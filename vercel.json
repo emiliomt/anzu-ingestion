@@ -1,0 +1,32 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "prisma generate && next build",
+  "installCommand": "npm install",
+  "functions": {
+    "src/app/api/upload/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/webhooks/email/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/webhooks/whatsapp/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/extract/[id]/route.ts": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "STORAGE_TYPE": "s3"
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PATCH, OPTIONS" }
+      ]
+    }
+  ]
+}

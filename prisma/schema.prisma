@@ -1,0 +1,87 @@
+// AnzuIngestion — Prisma schema
+// Default: SQLite for local dev. Switch provider to "postgresql" for production.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Vendor {
+  id        String    @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  invoices  Invoice[]
+
+  @@map("vendors")
+}
+
+model Invoice {
+  id           String           @id @default(uuid())
+  referenceNo  String           @unique
+  channel      String           // web | email | whatsapp
+  status       String           @default("received") // received | processing | extracted | reviewed | complete | error
+  fileUrl      String           // local path or S3 URL
+  fileName     String
+  mimeType     String
+  fileSize     Int?
+  submittedBy  String?          // email address or phone number
+  submittedName String?         // provider name if given
+  submittedAt  DateTime         @default(now())
+  processedAt  DateTime?
+  reviewedBy   String?
+  flags        String           @default("[]")  // JSON array of flag strings
+  isDuplicate  Boolean          @default(false)
+  duplicateOf  String?          // references another invoice id
+  vendorId     String?
+  vendor       Vendor?          @relation(fields: [vendorId], references: [id])
+  extractedData ExtractedField[]
+  lineItems    LineItem[]
+  events       IngestionEvent[]
+
+  @@map("invoices")
+}
+
+model ExtractedField {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  fieldName   String
+  value       String?
+  confidence  Float?
+  isVerified  Boolean @default(false)
+  isUncertain Boolean @default(false)
+
+  @@map("extracted_data")
+}
+
+model LineItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String?
+  quantity    Float?
+  unitPrice   Float?
+  lineTotal   Float?
+  confidence  Float?
+
+  @@map("line_items")
+}
+
+model IngestionEvent {
+  id        String   @id @default(uuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  eventType String   // received | processing_started | extracted | extraction_failed | reviewed | flagged | exported
+  timestamp DateTime @default(now())
+  metadata  String?  // JSON string
+
+  @@map("ingestion_events")
+}

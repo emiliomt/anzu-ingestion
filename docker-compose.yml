@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  # PostgreSQL database (for local production-like dev)
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: anzu
+      POSTGRES_PASSWORD: anzupassword
+      POSTGRES_DB: anzuingestion
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # AnzuIngestion app
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://anzu:anzupassword@postgres:5432/anzuingestion
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      STORAGE_TYPE: local
+      STORAGE_PATH: /app/uploads
+      NODE_ENV: production
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  uploads_data:

@@ -1,0 +1,207 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { storeFile } from "@/lib/storage";
+import { extractInvoice } from "@/lib/claude";
+import { sendConfirmationEmail, sendBounceEmail } from "@/lib/email";
+import { generateReferenceNo, isValidMime } from "@/lib/utils";
+
+/**
+ * POST /api/webhooks/email
+ * Handles SendGrid Inbound Parse webhook payloads.
+ * Each incoming email with invoice attachments is processed as individual invoices.
+ */
+export async function POST(request: NextRequest) {
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  const from = (formData.get("from") as string | null) ?? "";
+  const subject = (formData.get("subject") as string | null) ?? "";
+
+  // Extract sender email from "Name <email>" format
+  const emailMatch = from.match(/<(.+?)>/) ?? [null, from];
+  const senderEmail = emailMatch[1]?.trim() ?? from.trim();
+
+  // Count attachments
+  const attachmentCount = parseInt(
+    (formData.get("attachments") as string | null) ?? "0"
+  );
+
+  if (attachmentCount === 0) {
+    // Send bounce
+    if (senderEmail) {
+      await sendBounceEmail(
+        senderEmail,
+        "No valid invoice attachment found. Please attach a PDF or image file."
+      );
+    }
+    return NextResponse.json({ message: "No attachments" }, { status: 200 });
+  }
+
+  let processed = 0;
+  let firstRefNo = "";
+
+  for (let i = 1; i <= attachmentCount; i++) {
+    const attachment = formData.get(`attachment${i}`) as File | null;
+    if (!attachment) continue;
+
+    if (!isValidMime(attachment.type)) continue;
+
+    const buffer = Buffer.from(await attachment.arrayBuffer());
+    const referenceNo = generateReferenceNo();
+
+    const stored = await storeFile(
+      buffer,
+      attachment.name,
+      attachment.type,
+      "email"
+    );
+
+    const invoice = await prisma.invoice.create({
+      data: {
+        referenceNo,
+        channel: "email",
+        status: "processing",
+        fileUrl: stored.url,
+        fileName: stored.fileName,
+        mimeType: stored.mimeType,
+        fileSize: stored.fileSize,
+        submittedBy: senderEmail || null,
+        submittedName: null,
+      },
+    });
+
+    await prisma.ingestionEvent.create({
+      data: {
+        invoiceId: invoice.id,
+        eventType: "received",
+        metadata: JSON.stringify({
+          channel: "email",
+          from: senderEmail,
+          subject,
+          attachmentIndex: i,
+        }),
+      },
+    });
+
+    if (!firstRefNo) firstRefNo = referenceNo;
+    processed++;
+
+    // Extract async
+    processEmailInvoice(invoice.id, buffer, stored.mimeType, senderEmail).catch(
+      console.error
+    );
+  }
+
+  if (processed === 0) {
+    if (senderEmail) {
+      await sendBounceEmail(
+        senderEmail,
+        "No supported file types found. Please send PDF, JPEG, or PNG files."
+      );
+    }
+    return NextResponse.json({ message: "No valid attachments" }, { status: 200 });
+  }
+
+  // Send confirmation
+  if (senderEmail && firstRefNo) {
+    sendConfirmationEmail({
+      to: senderEmail,
+      referenceNo: firstRefNo,
+      channel: "email",
+    }).catch(console.error);
+  }
+
+  return NextResponse.json({ received: processed });
+}
+
+async function processEmailInvoice(
+  invoiceId: string,
+  buffer: Buffer,
+  mimeType: string,
+  submittedBy: string
+) {
+  try {
+    const extraction = await extractInvoice(buffer, mimeType);
+    const vendorNameValue = extraction.vendor_name?.value;
+
+    let vendorId: string | null = null;
+    if (vendorNameValue && typeof vendorNameValue === "string") {
+      const existing = await prisma.vendor.findFirst({
+        where: { name: { equals: vendorNameValue.trim() } },
+      });
+      if (existing) {
+        vendorId = existing.id;
+      } else {
+        const created = await prisma.vendor.create({
+          data: { name: vendorNameValue.trim(), email: submittedBy || null },
+        });
+        vendorId = created.id;
+      }
+    }
+
+    const FIELDS = [
+      "vendor_name",
+      "vendor_address",
+      "invoice_number",
+      "issue_date",
+      "due_date",
+      "subtotal",
+      "tax",
+      "total",
+      "currency",
+      "po_reference",
+      "payment_terms",
+      "bank_details",
+    ] as const;
+
+    await prisma.extractedField.createMany({
+      data: FIELDS.map((key) => ({
+        invoiceId,
+        fieldName: key,
+        value: extraction[key]?.value != null ? String(extraction[key].value) : null,
+        confidence: extraction[key]?.confidence ?? null,
+        isUncertain: extraction[key]?.is_uncertain ?? false,
+      })),
+    });
+
+    if (extraction.line_items.length > 0) {
+      await prisma.lineItem.createMany({
+        data: extraction.line_items.map((li) => ({
+          invoiceId,
+          description: li.description,
+          quantity: li.quantity,
+          unitPrice: li.unit_price,
+          lineTotal: li.line_total,
+          confidence: li.confidence,
+        })),
+      });
+    }
+
+    const flags: string[] = [];
+    const lowConf = FIELDS.some((k) => {
+      const c = extraction[k]?.confidence;
+      return c != null && c < 0.85;
+    });
+    if (lowConf) flags.push("low_confidence");
+
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: "extracted",
+        processedAt: new Date(),
+        vendorId,
+        flags: JSON.stringify(flags),
+      },
+    });
+  } catch (err) {
+    console.error("[Email Extract]", err);
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+    });
+  }
+}
