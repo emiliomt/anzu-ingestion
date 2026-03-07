@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { safeJsonParse } from "@/lib/utils";
 import { getServeUrl } from "@/lib/storage";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

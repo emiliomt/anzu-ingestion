@@ -4,6 +4,8 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { generateReferenceNo } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 /**
  * POST /api/webhooks/whatsapp
  * Handles Twilio incoming message webhooks.

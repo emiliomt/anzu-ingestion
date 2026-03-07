@@ -24,6 +24,7 @@ function scheduleBackground(promise: Promise<void>) {
   // On Railway/local Node.js the process stays alive, so fire-and-forget is fine
 }
 
+export const dynamic = "force-dynamic";
 export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if needed
 
 const MAX_FILES = 10;

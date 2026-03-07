@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { sendConfirmationEmail, sendBounceEmail } from "@/lib/email";
+
+export const dynamic = "force-dynamic";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 
 /**
