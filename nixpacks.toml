@@ -1,0 +1,17 @@
+[phases.setup]
+nixPkgs = ["nodejs_22", "openssl"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = [
+  "sed -i 's/provider = \"sqlite\"/provider = \"postgresql\"/' prisma/schema.prisma",
+  "npx prisma generate",
+  "npm run build"
+]
+
+[variables]
+NEXT_TELEMETRY_DISABLED = "1"
+NEXT_OUTPUT = "standalone"
+NODE_ENV = "production"
