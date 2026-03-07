@@ -18,6 +18,10 @@ RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
 # Generate Prisma client before building
 RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
+# Provide a dummy DATABASE_URL so Prisma can initialise at build time.
+# All API routes use `export const dynamic = "force-dynamic"` so no real
+# DB queries are made during `next build` — this just satisfies the env check.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN npm run build
 
 # ---- Runner ----
