@@ -18,6 +18,8 @@ RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
 # Generate Prisma client before building
 RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
+# Enable Next.js standalone output (required for Docker deployment)
+ENV NEXT_OUTPUT=standalone
 # Provide a dummy DATABASE_URL so Prisma can initialise at build time.
 # All API routes use `export const dynamic = "force-dynamic"` so no real
 # DB queries are made during `next build` — this just satisfies the env check.
