@@ -42,9 +42,10 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-# Copy prisma CLI so we can run db push at startup without downloading it
+# Copy prisma package so we can run db push at startup via node directly
+# (avoid .bin/prisma symlink: Docker resolves it and __dirname lands in .bin/,
+#  breaking the WASM lookup that's relative to the prisma package root)
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 
 # Create uploads directory for local file storage (or mount a volume)
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
