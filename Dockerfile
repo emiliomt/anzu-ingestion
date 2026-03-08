@@ -49,6 +49,10 @@ COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 # Create uploads directory for local file storage (or mount a volume)
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
 
+# Copy startup script and make executable (must be done as root, before USER)
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 USER nextjs
 
 EXPOSE 3000
@@ -56,4 +60,4 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Run DB migrations then start the server
-CMD ["sh", "-c", "./node_modules/.bin/prisma db push --skip-generate && node server.js"]
+CMD ["/app/start.sh"]
