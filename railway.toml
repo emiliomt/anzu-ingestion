@@ -2,8 +2,6 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "node server.js"
-healthcheckPath = "/api/metrics"
-healthcheckTimeout = 60
+startCommand = "echo '=== ANZU DEBUG ===' && echo PORT=$PORT && ls -la /app/server.js && node --version && node server.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
