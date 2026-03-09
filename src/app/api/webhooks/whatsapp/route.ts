@@ -26,13 +26,49 @@ export async function POST(request: NextRequest) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const toNumber = (formData.get("To") as string | null) ?? "";
+  const body = (formData.get("Body") as string | null)?.trim() ?? "";
+
+  // ── Status lookup: user texts an AZ- reference number ─────────────────────
+  if (numMedia === 0 && body.toUpperCase().startsWith("AZ-")) {
+    const invoice = await prisma.invoice.findUnique({
+      where: { referenceNo: body.toUpperCase() },
+      include: {
+        extractedData: {
+          where: { fieldName: { in: ["total", "currency"] } },
+          select: { fieldName: true, value: true },
+        },
+      },
+    });
+
+    if (invoice) {
+      const total = invoice.extractedData.find((f) => f.fieldName === "total");
+      const currency = invoice.extractedData.find((f) => f.fieldName === "currency");
+      const totalStr =
+        total?.value && currency?.value
+          ? `${currency.value} ${Number(total.value).toFixed(2)}`
+          : total?.value ?? "—";
+
+      await sendWhatsAppReply(
+        from, toNumber,
+        `📄 Invoice *${body.toUpperCase()}*\nStatus: ${invoice.status.toUpperCase()}\nAmount: ${totalStr}`,
+        accountSid, authToken
+      );
+    } else {
+      await sendWhatsAppReply(
+        from, toNumber,
+        `Reference *${body}* not found. Please check and try again.`,
+        accountSid, authToken
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   if (numMedia === 0) {
-    // Send a help reply
+    // No media and not a status query — send help
     await sendWhatsAppReply(
       from,
       toNumber,
-      "Hi! To submit an invoice, please send an image or PDF file. 📄",
+      "Hi! To submit an invoice, please send an image or PDF file. 📄\n\nTo check the status of an invoice, reply with your reference number (e.g. *AZ-2025-A1B2C3*).",
       accountSid,
       authToken
     );
@@ -46,9 +82,16 @@ export async function POST(request: NextRequest) {
     const mediaContentType =
       (formData.get(`MediaContentType${i}`) as string | null) ?? "";
 
-    if (
-      !["application/pdf", "image/jpeg", "image/png"].includes(mediaContentType)
-    ) {
+    const ACCEPTED_TYPES = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/tiff",
+    ];
+    if (!ACCEPTED_TYPES.includes(mediaContentType)) {
+      console.log(`[WhatsApp] Skipping unsupported media type: ${mediaContentType}`);
       continue;
     }
 
@@ -69,12 +112,15 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceNo = generateReferenceNo();
-    const ext =
-      mediaContentType === "application/pdf"
-        ? "pdf"
-        : mediaContentType === "image/png"
-        ? "png"
-        : "jpg";
+    const EXT_MAP: Record<string, string> = {
+      "application/pdf": "pdf",
+      "image/jpeg":      "jpg",
+      "image/png":       "png",
+      "image/webp":      "webp",
+      "image/heic":      "heic",
+      "image/tiff":      "tiff",
+    };
+    const ext = EXT_MAP[mediaContentType] ?? "jpg";
 
     const stored = await storeFile(
       buffer,
@@ -132,47 +178,6 @@ export async function POST(request: NextRequest) {
       accountSid,
       authToken
     );
-  }
-
-  // Handle status query (provider replies with their reference number)
-  const body = (formData.get("Body") as string | null)?.trim() ?? "";
-  if (numMedia === 0 && body.startsWith("AZ-")) {
-    const invoice = await prisma.invoice.findUnique({
-      where: { referenceNo: body },
-      include: {
-        extractedData: {
-          where: { fieldName: { in: ["total", "currency"] } },
-          select: { fieldName: true, value: true },
-        },
-      },
-    });
-
-    if (invoice) {
-      const total = invoice.extractedData.find((f) => f.fieldName === "total");
-      const currency = invoice.extractedData.find(
-        (f) => f.fieldName === "currency"
-      );
-      const totalStr =
-        total?.value && currency?.value
-          ? `${currency.value} ${Number(total.value).toFixed(2)}`
-          : total?.value ?? "—";
-
-      await sendWhatsAppReply(
-        from,
-        toNumber,
-        `📄 Invoice *${body}*\nStatus: ${invoice.status.toUpperCase()}\nAmount: ${totalStr}`,
-        accountSid,
-        authToken
-      );
-    } else {
-      await sendWhatsAppReply(
-        from,
-        toNumber,
-        `Reference *${body}* not found. Please check and try again.`,
-        accountSid,
-        authToken
-      );
-    }
   }
 
   return NextResponse.json({ ok: true });
