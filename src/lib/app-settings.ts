@@ -45,7 +45,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   document_language:          "es",
   amount_format:              "auto",
   low_confidence_threshold:   0.85,
-  extraction_timeout_seconds: 25,
+  extraction_timeout_seconds: 45,
   auto_approve_threshold:     null,
   flag_duplicates:            true,
 };

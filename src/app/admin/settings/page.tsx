@@ -380,12 +380,12 @@ export default function SettingsPage() {
                   </div>
                 </FieldRow>
 
-                <FieldRow label="Extraction Timeout" hint="GPT-4o-mini API call timeout (10–60 seconds)">
+                <FieldRow label="Extraction Timeout" hint="GPT-4o-mini API call timeout (10–90 seconds)">
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
-                      min={10} max={60} step={5}
-                      value={draft.extraction_timeout_seconds ?? 25}
+                      min={10} max={90} step={5}
+                      value={draft.extraction_timeout_seconds ?? 45}
                       onChange={(e) => setDraftField("extraction_timeout_seconds", parseInt(e.target.value, 10))}
                       className={`${inputClass} w-24`}
                     />
