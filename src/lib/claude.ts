@@ -1,11 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { bufferToBase64, toAnthropicMediaType } from "./utils";
+import OpenAI from "openai";
+import { bufferToBase64 } from "./utils";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "gpt-4o";
 
 export interface ExtractionField {
   value: string | number | null;
@@ -80,84 +80,75 @@ export async function extractInvoice(
   fileBuffer: Buffer,
   mimeType: string
 ): Promise<InvoiceExtraction> {
-  const base64Data = bufferToBase64(fileBuffer.buffer as ArrayBuffer);
-  const anthropicMediaType = toAnthropicMediaType(mimeType);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contentParts: any[] = [];
+  let uploadedFileId: string | null = null;
 
-  // Build the content block — PDF uses document type, images use image type
-  type ContentBlock =
-    | {
-        type: "image";
-        source: { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string };
-      }
-    | {
-        type: "document";
-        source: { type: "base64"; media_type: "application/pdf"; data: string };
-      }
-    | { type: "text"; text: string };
-
-  let fileContent: ContentBlock;
-
-  if (anthropicMediaType === "application/pdf") {
-    fileContent = {
-      type: "document",
-      source: {
-        type: "base64",
-        media_type: "application/pdf",
-        data: base64Data,
-      },
-    };
+  if (mimeType === "application/pdf") {
+    // PDFs must be uploaded to the OpenAI Files API first, then referenced by ID
+    const uploaded = await client.files.create({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      file: new File([new Uint8Array(fileBuffer)], "invoice.pdf", { type: "application/pdf" }) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      purpose: "user_data" as any,
+    });
+    uploadedFileId = uploaded.id;
+    contentParts.push({ type: "file", file: { file_id: uploadedFileId } });
   } else {
-    fileContent = {
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: anthropicMediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-        data: base64Data,
+    // Images: send as base64 data URL via the vision API
+    const base64Data = bufferToBase64(fileBuffer.buffer as ArrayBuffer);
+    const imageType = mimeType.includes("png")
+      ? "image/png"
+      : mimeType.includes("webp")
+      ? "image/webp"
+      : "image/jpeg";
+
+    contentParts.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${imageType};base64,${base64Data}`,
+        detail: "high",
       },
-    };
+    });
   }
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    temperature: 0,
-    messages: [
-      {
-        role: "user",
-        content: [
-          fileContent,
-          {
-            type: "text",
-            text: EXTRACTION_PROMPT,
-          },
-        ],
-      },
-    ],
-  });
+  contentParts.push({ type: "text", text: EXTRACTION_PROMPT });
 
-  const text = response.content
-    .filter((c) => c.type === "text")
-    .map((c) => (c as { type: "text"; text: string }).text)
-    .join("");
-
-  // Parse the JSON response — strip any accidental markdown fences
-  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
-  let parsed: InvoiceExtraction;
   try {
-    parsed = JSON.parse(cleaned) as InvoiceExtraction;
-  } catch {
-    throw new Error(
-      `Claude returned invalid JSON. Raw response: ${text.slice(0, 500)}`
-    );
-  }
+    const response = await client.chat.completions.create({
+      model: MODEL,
+      max_tokens: 4096,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: contentParts }],
+    });
 
-  // Ensure line_items is always an array
-  if (!Array.isArray(parsed.line_items)) {
-    parsed.line_items = [];
-  }
+    const text = response.choices[0]?.message?.content ?? "";
 
-  return parsed;
+    // Strip any accidental markdown fences then parse
+    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+    let parsed: InvoiceExtraction;
+    try {
+      parsed = JSON.parse(cleaned) as InvoiceExtraction;
+    } catch {
+      throw new Error(
+        `OpenAI returned invalid JSON. Raw response: ${text.slice(0, 500)}`
+      );
+    }
+
+    // Ensure line_items is always an array
+    if (!Array.isArray(parsed.line_items)) {
+      parsed.line_items = [];
+    }
+
+    return parsed;
+  } finally {
+    // Clean up the uploaded PDF file (non-fatal if this fails)
+    if (uploadedFileId) {
+      client.files.delete(uploadedFileId).catch(() => {});
+    }
+  }
 }
 
 /**
