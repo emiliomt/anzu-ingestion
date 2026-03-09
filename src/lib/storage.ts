@@ -108,11 +108,11 @@ export async function readFile(fileUrl: string): Promise<Buffer> {
 
 /** Returns a URL suitable for the browser to fetch the file */
 export function getServeUrl(fileUrl: string): string {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Use a relative URL so it resolves correctly on any domain (Railway, Vercel, localhost, etc.)
   if (fileUrl.startsWith("s3://")) {
-    return `${appUrl}/api/files?s3=${encodeURIComponent(fileUrl)}`;
+    return `/api/files?s3=${encodeURIComponent(fileUrl)}`;
   }
-  return `${appUrl}/api/files?path=${encodeURIComponent(fileUrl)}`;
+  return `/api/files?path=${encodeURIComponent(fileUrl)}`;
 }
 
 /** Generate a presigned S3 URL (1-hour expiry). Falls back to API route for local. */
