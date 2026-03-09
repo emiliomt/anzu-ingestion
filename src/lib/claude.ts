@@ -43,40 +43,113 @@ export interface InvoiceExtraction {
   line_items: LineItemExtraction[];
 }
 
-const EXTRACTION_PROMPT = `You are an expert invoice data extraction system. Extract all structured data from the provided invoice document.
+// ─── System prompt ────────────────────────────────────────────────────────────
+// Kept in the system role so GPT-4o treats it as standing instructions rather
+// than part of the document being analysed. This significantly improves
+// instruction-following and confidence calibration.
+const SYSTEM_PROMPT = `You are an expert invoice OCR and structured data extraction system. You have deep knowledge of invoice formats from Latin America (Colombia, Mexico, Argentina, Chile, Peru, Uruguay), USA, Canada, Europe, and worldwide.
 
-Return ONLY valid JSON with this exact structure (no preamble, no explanation, no markdown):
+══ CURRENCY DETECTION ════════════════════════════════════════════════
+Currency must NEVER be null when monetary amounts exist in the document.
+Work through these signals in order:
+
+1. EXPLICIT ISO CODE — if the document says "USD", "EUR", "COP", "MXN", "ARS", "CLP", "BRL", "PEN", "GBP", etc., use it directly. Confidence 1.0.
+
+2. CURRENCY WORDS
+   "dólares americanos" → USD
+   "pesos colombianos" / "pesos" (Colombia) → COP
+   "pesos mexicanos" / "pesos" (Mexico) → MXN
+   "pesos argentinos" / "pesos" (Argentina) → ARS
+   "pesos chilenos" / "pesos" (Chile) → CLP
+   "euros" → EUR   "libras" → GBP   "reales" → BRL   "soles" → PEN
+   Confidence 0.95.
+
+3. TAX ID FORMAT → COUNTRY → CURRENCY (very reliable)
+   NIT format "900.xxx.xxx-x" or "xxx.xxx.xxx-x" → Colombia → COP
+   RFC format "XXXX999999XXX" → Mexico → MXN
+   CUIT/CUIL "XX-XXXXXXXX-X" → Argentina → ARS
+   RUT "XX.XXX.XXX-X" → Chile → CLP
+   RUC → Peru → PEN or Ecuador → USD
+   CNPJ/CPF → Brazil → BRL
+   EIN/SSN/FEIN → USA → USD
+   VAT "GB..." → UK → GBP
+   VAT "DE/FR/ES/IT..." → EU → EUR
+   Confidence 0.90.
+
+4. SYMBOL + ADDRESS CONTEXT
+   "$" + Colombian city (Bogotá, Medellín, Cali, Barranquilla…) → COP
+   "$" + Mexican city (CDMX, Monterrey, Guadalajara…) → MXN
+   "$" + Argentine city (Buenos Aires, Córdoba, Rosario…) → ARS
+   "$" + Chilean city (Santiago, Valparaíso…) → CLP
+   "$" + US city / state → USD
+   "€" → EUR   "£" → GBP
+   Confidence 0.80.
+
+5. AMOUNT MAGNITUDE HEURISTIC (last resort, low confidence)
+   Amounts > 100,000 with "$" and no US/CA address → likely Latin American peso (COP most common)
+   Confidence 0.65, set is_uncertain: true.
+
+══ NUMBER FORMAT RULES ══════════════════════════════════════════════
+Latin American and European invoices use DIFFERENT separators than US:
+  "1.200.000"       → 1200000   (period = thousands separator)
+  "1.200.000,00"    → 1200000   (period = thousands, comma = decimal)
+  "107.100"         → 107100    (if context suggests large currency like COP)
+  "1.250,50"        → 1250.50   (European: comma = decimal)
+  "1,250.50"        → 1250.50   (US: comma = thousands, period = decimal)
+Always return amounts as plain JS numbers (no commas, no symbols, no strings).
+When in doubt about separators, use the currency and country context.
+
+══ CONFIDENCE SCORING ═══════════════════════════════════════════════
+1.00  Field is explicitly and clearly present, no ambiguity
+0.95  Field clearly present, very minor OCR uncertainty
+0.85  Field present but required minor inference
+0.75  Field inferred from strong contextual signals → is_uncertain: false
+0.65  Field inferred from weak/indirect signals     → is_uncertain: true
+<0.65 Very uncertain or speculative                → is_uncertain: true
+
+══ FIELD-SPECIFIC RULES ═════════════════════════════════════════════
+vendor_name:     Company/person ISSUING the invoice (not the buyer/client)
+vendor_address:  Full address of the vendor including city, country if present
+invoice_number:  Look for "Factura No.", "Invoice #", "No. Factura", "Nro.", "Número".
+                 CUFE, CUDE, UUID are NOT the invoice number — ignore them.
+issue_date:      Date invoice was created/issued. ISO format YYYY-MM-DD.
+due_date:        Payment due date. If not explicitly stated, return null.
+subtotal:        Amount before tax. If only total is shown, return null for subtotal.
+tax:             IVA / VAT / GST amount as a number. Look for "IVA 19%", "IVA", "Tax".
+total:           Grand total. Look for "TOTAL", "Total a Pagar", "Total Factura".
+bank_details:    Concatenate all payment info: bank name, account number, routing, IBAN, etc.
+po_reference:    Purchase order number. Look for "O.C.", "Orden de Compra", "P.O.", "PO#".
+payment_terms:   e.g. "Net 30", "Contado", "30 días", "Pago inmediato".
+line_items:      Extract ALL rows from itemised tables. Include service descriptions.`;
+
+// ─── User prompt ──────────────────────────────────────────────────────────────
+// Short and structural — the heavy lifting is in the system prompt above.
+const USER_PROMPT = `Analyse this invoice document and extract all structured data.
+Return ONLY valid JSON matching this exact schema — no preamble, no markdown fences:
+
 {
-  "vendor_name": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "vendor_address": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "invoice_number": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "issue_date": { "value": "YYYY-MM-DD or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "due_date": { "value": "YYYY-MM-DD or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "subtotal": { "value": number or null, "confidence": 0.0-1.0, "is_uncertain": false },
-  "tax": { "value": number or null, "confidence": 0.0-1.0, "is_uncertain": false },
-  "total": { "value": number or null, "confidence": 0.0-1.0, "is_uncertain": false },
-  "currency": { "value": "USD|EUR|GBP|etc or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "po_reference": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "payment_terms": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
-  "bank_details": { "value": "string or null", "confidence": 0.0-1.0, "is_uncertain": false },
+  "vendor_name":    { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "vendor_address": { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "invoice_number": { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "issue_date":     { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
+  "due_date":       { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
+  "subtotal":       { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "tax":            { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "total":          { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "currency":       { "value": "ISO 4217 code or null", "confidence": 0.0, "is_uncertain": false },
+  "po_reference":   { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "payment_terms":  { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "bank_details":   { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
   "line_items": [
     {
       "description": "string or null",
-      "quantity": number or null,
-      "unit_price": number or null,
-      "line_total": number or null,
-      "confidence": 0.0-1.0
+      "quantity":    null,
+      "unit_price":  null,
+      "line_total":  null,
+      "confidence":  0.0
     }
   ]
-}
-
-Rules:
-- Return null for any field not found in the document — NEVER hallucinate values
-- Set is_uncertain: true for fields that are ambiguous or hard to read
-- Confidence scores reflect how certain you are (1.0 = certain, 0.0 = no idea)
-- Dates must be ISO format: YYYY-MM-DD
-- Amounts must be numbers (not strings), e.g. 1250.00 not "$1,250.00"
-- line_items is an empty array [] if no line items are found`;
+}`;
 
 /**
  * Extract structured data from an invoice file (image or PDF).
@@ -118,7 +191,8 @@ export async function extractInvoice(
     });
   }
 
-  contentParts.push({ type: "text", text: EXTRACTION_PROMPT });
+  // Document content first, then the extraction instruction
+  contentParts.push({ type: "text", text: USER_PROMPT });
 
   try {
     const response = await getClient().chat.completions.create({
@@ -126,7 +200,12 @@ export async function extractInvoice(
       max_tokens: 4096,
       temperature: 0,
       response_format: { type: "json_object" },
-      messages: [{ role: "user", content: contentParts }],
+      messages: [
+        // System message carries the standing extraction rules —
+        // GPT-4o follows these much more reliably than inline instructions
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: contentParts },
+      ],
     });
 
     const text = response.choices[0]?.message?.content ?? "";
