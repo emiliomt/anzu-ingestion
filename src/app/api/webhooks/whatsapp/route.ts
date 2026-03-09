@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { generateReferenceNo } from "@/lib/utils";
+import { getSettings } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -187,8 +188,16 @@ async function processWhatsAppInvoice(
   accountSid: string | undefined,
   authToken: string | undefined
 ) {
+  const settings = await getSettings();
+
   try {
-    const extraction = await extractInvoice(buffer, mimeType);
+    const extraction = await extractInvoice(buffer, mimeType, {
+      default_country:   settings.default_country,
+      default_currency:  settings.default_currency,
+      document_language: settings.document_language,
+      amount_format:     settings.amount_format,
+      timeout_ms:        settings.extraction_timeout_seconds * 1000,
+    });
     const vendorNameValue = extraction.vendor_name?.value;
 
     let vendorId: string | null = null;

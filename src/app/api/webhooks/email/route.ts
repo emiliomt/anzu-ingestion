@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { sendConfirmationEmail, sendBounceEmail } from "@/lib/email";
+import { getSettings } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
@@ -126,8 +127,16 @@ async function processEmailInvoice(
   mimeType: string,
   submittedBy: string
 ) {
+  const settings = await getSettings();
+
   try {
-    const extraction = await extractInvoice(buffer, mimeType);
+    const extraction = await extractInvoice(buffer, mimeType, {
+      default_country:   settings.default_country,
+      default_currency:  settings.default_currency,
+      document_language: settings.document_language,
+      amount_format:     settings.amount_format,
+      timeout_ms:        settings.extraction_timeout_seconds * 1000,
+    });
     const vendorNameValue = extraction.vendor_name?.value;
 
     let vendorId: string | null = null;
@@ -184,16 +193,25 @@ async function processEmailInvoice(
     }
 
     const flags: string[] = [];
+    const confThreshold = settings.low_confidence_threshold;
     const lowConf = FIELDS.some((k) => {
       const c = extraction[k]?.confidence;
-      return c != null && c < 0.85;
+      return c != null && c < confThreshold;
     });
     if (lowConf) flags.push("low_confidence");
+
+    const approveThreshold = settings.auto_approve_threshold;
+    const allHighConf = FIELDS.every((k) => {
+      const c = extraction[k]?.confidence;
+      return c == null || c >= (approveThreshold ?? Infinity);
+    });
+    const finalStatus =
+      approveThreshold !== null && allHighConf ? "reviewed" : "extracted";
 
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: {
-        status: "extracted",
+        status: finalStatus,
         processedAt: new Date(),
         vendorId,
         flags: JSON.stringify(flags),

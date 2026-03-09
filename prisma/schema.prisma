@@ -85,3 +85,12 @@ model IngestionEvent {
 
   @@map("ingestion_events")
 }
+
+// Application-wide key-value settings (editable from the admin Settings page)
+model Setting {
+  key       String   @id   // e.g. "default_currency", "default_country"
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}

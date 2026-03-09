@@ -4,6 +4,7 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoice, buildDuplicateKey } from "@/lib/claude";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
+import { getSettings } from "@/lib/app-settings";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -165,8 +166,17 @@ async function processInvoice(
     },
   });
 
+  // Load settings for this extraction run
+  const settings = await getSettings();
+
   try {
-    const extraction = await extractInvoice(buffer, mimeType);
+    const extraction = await extractInvoice(buffer, mimeType, {
+      default_country:   settings.default_country,
+      default_currency:  settings.default_currency,
+      document_language: settings.document_language,
+      amount_format:     settings.amount_format,
+      timeout_ms:        settings.extraction_timeout_seconds * 1000,
+    });
 
     // Upsert vendor
     let vendorId: string | null = null;
@@ -193,7 +203,7 @@ async function processInvoice(
       }
     }
 
-    // Duplicate detection
+    // Duplicate detection (only when enabled in settings)
     const invoiceNumberValue = extraction.invoice_number?.value;
     const duplicateKey = buildDuplicateKey(
       typeof invoiceNumberValue === "string" ? invoiceNumberValue : null,
@@ -203,7 +213,7 @@ async function processInvoice(
     let isDuplicate = false;
     let duplicateOf: string | null = null;
 
-    if (duplicateKey) {
+    if (settings.flag_duplicates && duplicateKey) {
       // Look for existing invoice with same vendor + invoice number
       const invoiceNum = typeof invoiceNumberValue === "string" ? invoiceNumberValue : null;
       const vendorName = typeof vendorNameValue === "string" ? vendorNameValue : null;
@@ -313,19 +323,28 @@ async function processInvoice(
     const flags: string[] = [];
     if (isDuplicate) flags.push("duplicate");
 
-    // Flag low-confidence fields (only check core fields — extended fields
-    // being absent is normal and should not trigger a low-confidence flag)
+    // Flag low-confidence fields using the configured threshold
+    const confThreshold = settings.low_confidence_threshold;
     const lowConfFields = CORE_FIELDS.filter((key) => {
       const c = extraction[key]?.confidence;
-      return c != null && c < 0.85;
+      return c != null && c < confThreshold;
     });
     if (lowConfFields.length > 0) flags.push("low_confidence");
+
+    // Auto-approve: if all core fields meet the threshold, set status to reviewed
+    const approveThreshold = settings.auto_approve_threshold;
+    const allCoreHighConf = CORE_FIELDS.every((key) => {
+      const c = extraction[key]?.confidence;
+      return c == null || c >= (approveThreshold ?? Infinity);
+    });
+    const finalStatus =
+      approveThreshold !== null && allCoreHighConf ? "reviewed" : "extracted";
 
     // Update invoice record
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: {
-        status: "extracted",
+        status: finalStatus,
         processedAt: new Date(),
         vendorId,
         isDuplicate,
@@ -337,12 +356,13 @@ async function processInvoice(
     await prisma.ingestionEvent.create({
       data: {
         invoiceId,
-        eventType: "extracted",
+        eventType: finalStatus === "reviewed" ? "reviewed" : "extracted",
         metadata: JSON.stringify({
           fieldsExtracted: SCALAR_FIELDS.length,
           lineItems: extraction.line_items.length,
           isDuplicate,
           flags,
+          autoApproved: finalStatus === "reviewed",
         }),
       },
     });

@@ -19,6 +19,20 @@ import { bufferToBase64 } from "./utils";
 import { cleanOcrText } from "./ocr-cleaner";
 import { parseInvoiceXML } from "./xml-parser";
 
+// ── Extraction options (injected from app settings) ───────────────────────────
+export interface ExtractionOptions {
+  /** ISO 3166-1 alpha-2 fallback country if currency detection fails */
+  default_country?: string;
+  /** ISO 4217 fallback currency if all detection layers fail */
+  default_currency?: string;
+  /** "auto" | "es" | "en" | "pt" */
+  document_language?: string;
+  /** "auto" | "latin_american" | "us" */
+  amount_format?: string;
+  /** GPT-4o-mini timeout in milliseconds (default: 25 000) */
+  timeout_ms?: number;
+}
+
 // ── OpenAI client (lazy — constructor must NOT run at Next.js build time) ─────
 let _client: OpenAI | null = null;
 function getClient(): OpenAI {
@@ -209,6 +223,27 @@ const OCR_SYSTEM_PROMPT =
   "Preserve every number, date, address, table row, and label. " +
   "Do not interpret, summarise, or restructure — output only the raw visible text.";
 
+// ── Build context footer appended to system prompt ────────────────────────────
+function buildContextSection(opts: ExtractionOptions): string {
+  const lines: string[] = ["", "══ DOCUMENT CONTEXT (from system settings) ═════════════════════════════════"];
+  if (opts.default_country) {
+    lines.push(`Default country: ${opts.default_country}`);
+  }
+  if (opts.default_currency) {
+    lines.push(`Default currency: ${opts.default_currency} — use this if ALL detection signals above are absent or inconclusive.`);
+  }
+  if (opts.document_language && opts.document_language !== "auto") {
+    lines.push(`Document language: ${opts.document_language}`);
+  }
+  if (opts.amount_format && opts.amount_format !== "auto") {
+    const desc = opts.amount_format === "latin_american"
+      ? "Latin American (period=thousands, comma=decimal): 1.234.567,89"
+      : "US/International (comma=thousands, period=decimal): 1,234,567.89";
+    lines.push(`Amount format: ${desc}`);
+  }
+  return lines.join("\n");
+}
+
 // ── Path 1: XML → deterministic parse ─────────────────────────────────────────
 function handleXml(buffer: Buffer): InvoiceExtraction {
   const xmlText = buffer.toString("utf-8");
@@ -218,7 +253,8 @@ function handleXml(buffer: Buffer): InvoiceExtraction {
 // ── Path 2: Image / PDF → GPT-4o OCR → clean → GPT-4o-mini extract ───────────
 async function handleImageOrPdf(
   buffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  opts: ExtractionOptions = {}
 ): Promise<InvoiceExtraction> {
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,6 +319,9 @@ async function handleImageOrPdf(
   // Truncate to 4000 chars to stay within token budget
   const truncatedText = cleanedText.slice(0, 4000);
 
+  const timeoutMs = opts.timeout_ms ?? 25_000;
+  const systemPrompt = EXTRACTION_SYSTEM_PROMPT + buildContextSection(opts);
+
   const extractResp = await Promise.race([
     getClient().chat.completions.create({
       model: EXTRACT_MODEL,
@@ -290,13 +329,12 @@ async function handleImageOrPdf(
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: EXTRACTION_USER_PROMPT + truncatedText },
       ],
     }),
-    // 25-second timeout
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("GPT-4o-mini extraction timed out")), 25_000)
+      setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
     ),
   ]);
 
@@ -324,10 +362,15 @@ async function handleImageOrPdf(
  * Routing:
  *   XML                → deterministic XML parser (no AI, no cost)
  *   Image / PDF        → GPT-4o OCR → 8-step clean → GPT-4o-mini extract
+ *
+ * @param opts  Optional settings injected from the app Settings page
+ *              (default_country, default_currency, document_language,
+ *              amount_format, timeout_ms).  If omitted, sensible defaults apply.
  */
 export async function extractInvoice(
   fileBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  opts: ExtractionOptions = {}
 ): Promise<InvoiceExtraction> {
   const isXml =
     mimeType === "text/xml" ||
@@ -340,13 +383,13 @@ export async function extractInvoice(
       const peek = fileBuffer.slice(0, 20).toString("utf-8").trimStart();
       if (!peek.startsWith("<")) {
         // Real plain-text (rare edge case) — fall through to AI path
-        return handleImageOrPdf(fileBuffer, mimeType);
+        return handleImageOrPdf(fileBuffer, mimeType, opts);
       }
     }
     return handleXml(fileBuffer);
   }
 
-  return handleImageOrPdf(fileBuffer, mimeType);
+  return handleImageOrPdf(fileBuffer, mimeType, opts);
 }
 
 /**
