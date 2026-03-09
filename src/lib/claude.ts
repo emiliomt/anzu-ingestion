@@ -1,9 +1,15 @@
 import OpenAI from "openai";
 import { bufferToBase64 } from "./utils";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-initialize so the constructor doesn't run at build time
+// (OPENAI_API_KEY is only available at runtime, not during `next build`)
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _client;
+}
 
 const MODEL = "gpt-4o";
 
@@ -86,7 +92,7 @@ export async function extractInvoice(
 
   if (mimeType === "application/pdf") {
     // PDFs must be uploaded to the OpenAI Files API first, then referenced by ID
-    const uploaded = await client.files.create({
+    const uploaded = await getClient().files.create({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       file: new File([new Uint8Array(fileBuffer)], "invoice.pdf", { type: "application/pdf" }) as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,7 +121,7 @@ export async function extractInvoice(
   contentParts.push({ type: "text", text: EXTRACTION_PROMPT });
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: MODEL,
       max_tokens: 4096,
       temperature: 0,
@@ -146,7 +152,7 @@ export async function extractInvoice(
   } finally {
     // Clean up the uploaded PDF file (non-fatal if this fails)
     if (uploadedFileId) {
-      client.files.delete(uploadedFileId).catch(() => {});
+      getClient().files.delete(uploadedFileId).catch(() => {});
     }
   }
 }
