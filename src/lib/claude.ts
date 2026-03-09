@@ -1,8 +1,25 @@
+/**
+ * Invoice AI extraction — three-path pipeline:
+ *
+ *   1. XML  (text/xml | application/xml)
+ *      → parseInvoiceXML()  — no AI, deterministic, confidence 0.95
+ *
+ *   2. Image / PDF
+ *      → GPT-4o vision  (OCR pass — extracts raw text only)
+ *      → cleanOcrText() (8-step normalisation)
+ *      → GPT-4o-mini    (structured extraction from clean text)
+ *
+ * The two-pass image/PDF approach costs less than a single GPT-4o
+ * structured-extraction call because the OCR pass emits few tokens and
+ * the extraction pass uses the much cheaper gpt-4o-mini model.
+ */
+
 import OpenAI from "openai";
 import { bufferToBase64 } from "./utils";
+import { cleanOcrText } from "./ocr-cleaner";
+import { parseInvoiceXML } from "./xml-parser";
 
-// Lazy-initialize so the constructor doesn't run at build time
-// (OPENAI_API_KEY is only available at runtime, not during `next build`)
+// ── OpenAI client (lazy — constructor must NOT run at Next.js build time) ─────
 let _client: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!_client) {
@@ -11,7 +28,10 @@ function getClient(): OpenAI {
   return _client;
 }
 
-const MODEL = "gpt-4o";
+const OCR_MODEL       = "gpt-4o";       // vision — needed for image/PDF OCR
+const EXTRACT_MODEL   = "gpt-4o-mini";  // text-only — cheap structured extraction
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ExtractionField {
   value: string | number | null;
@@ -21,125 +41,154 @@ export interface ExtractionField {
 
 export interface LineItemExtraction {
   description: string | null;
-  quantity: number | null;
-  unit_price: number | null;
-  line_total: number | null;
-  confidence: number;
+  quantity:    number | null;
+  unit_price:  number | null;
+  line_total:  number | null;
+  confidence:  number;
 }
 
 export interface InvoiceExtraction {
-  vendor_name: ExtractionField;
+  // ── Core fields ─────────────────────────────────────────────────────────
+  vendor_name:    ExtractionField;
   vendor_address: ExtractionField;
   invoice_number: ExtractionField;
-  issue_date: ExtractionField;
-  due_date: ExtractionField;
-  subtotal: ExtractionField;
-  tax: ExtractionField;
-  total: ExtractionField;
-  currency: ExtractionField;
-  po_reference: ExtractionField;
-  payment_terms: ExtractionField;
-  bank_details: ExtractionField;
-  line_items: LineItemExtraction[];
+  issue_date:     ExtractionField;
+  due_date:       ExtractionField;
+  subtotal:       ExtractionField;
+  tax:            ExtractionField;
+  total:          ExtractionField;
+  currency:       ExtractionField;
+  po_reference:   ExtractionField;
+  payment_terms:  ExtractionField;
+  bank_details:   ExtractionField;
+  line_items:     LineItemExtraction[];
+
+  // ── Extended fields (populated by XML parser & enhanced AI extraction) ──
+  vendor_tax_id?:       ExtractionField; // NIT / RFC / CUIT of the vendor
+  buyer_name?:          ExtractionField; // Adquiriente / Cliente name
+  buyer_tax_id?:        ExtractionField; // NIT / RFC / CUIT of the buyer
+  buyer_address?:       ExtractionField; // Buyer's full address
+  concept?:             ExtractionField; // Invoice concept / subject line
+  project_name?:        ExtractionField; // Obra / project name
+  project_address?:     ExtractionField; // Project physical address
+  project_city?:        ExtractionField; // City where project is located
+  description_summary?: ExtractionField; // Summary of services rendered
+  notes?:               ExtractionField; // Observations / footer notes
 }
 
-// ─── System prompt ────────────────────────────────────────────────────────────
-// Kept in the system role so GPT-4o treats it as standing instructions rather
-// than part of the document being analysed. This significantly improves
-// instruction-following and confidence calibration.
-const SYSTEM_PROMPT = `You are an expert invoice OCR and structured data extraction system. You have deep knowledge of invoice formats from Latin America (Colombia, Mexico, Argentina, Chile, Peru, Uruguay), USA, Canada, Europe, and worldwide.
+// ── System prompt (shared by both the OCR‑extracted path and direct path) ─────
+//
+// Lives in the system role so GPT-4o-mini treats it as standing instructions
+// rather than part of the document being analysed.
+const EXTRACTION_SYSTEM_PROMPT = `You are an expert invoice OCR and structured data extraction system. You have deep knowledge of invoice formats from Latin America (Colombia, Mexico, Argentina, Chile, Peru, Uruguay), USA, Canada, Europe, and worldwide.
 
-══ CURRENCY DETECTION ════════════════════════════════════════════════
+══ CURRENCY DETECTION ══════════════════════════════════════════════════════════
 Currency must NEVER be null when monetary amounts exist in the document.
 Work through these signals in order:
 
-1. EXPLICIT ISO CODE — if the document says "USD", "EUR", "COP", "MXN", "ARS", "CLP", "BRL", "PEN", "GBP", etc., use it directly. Confidence 1.0.
+1. EXPLICIT ISO CODE — if the document says "USD", "EUR", "COP", "MXN", "ARS",
+   "CLP", "BRL", "PEN", "GBP", etc., use it directly. Confidence 1.0.
 
 2. CURRENCY WORDS
-   "dólares americanos" → USD
-   "pesos colombianos" / "pesos" (Colombia) → COP
-   "pesos mexicanos" / "pesos" (Mexico) → MXN
-   "pesos argentinos" / "pesos" (Argentina) → ARS
-   "pesos chilenos" / "pesos" (Chile) → CLP
-   "euros" → EUR   "libras" → GBP   "reales" → BRL   "soles" → PEN
+   "dólares americanos"   → USD
+   "pesos colombianos"    → COP
+   "pesos mexicanos"      → MXN
+   "pesos argentinos"     → ARS
+   "pesos chilenos"       → CLP
+   "euros"                → EUR  |  "libras"  → GBP
+   "reales"               → BRL  |  "soles"   → PEN
    Confidence 0.95.
 
-3. TAX ID FORMAT → COUNTRY → CURRENCY (very reliable)
-   NIT format "900.xxx.xxx-x" or "xxx.xxx.xxx-x" → Colombia → COP
-   RFC format "XXXX999999XXX" → Mexico → MXN
-   CUIT/CUIL "XX-XXXXXXXX-X" → Argentina → ARS
-   RUT "XX.XXX.XXX-X" → Chile → CLP
-   RUC → Peru → PEN or Ecuador → USD
-   CNPJ/CPF → Brazil → BRL
-   EIN/SSN/FEIN → USA → USD
-   VAT "GB..." → UK → GBP
-   VAT "DE/FR/ES/IT..." → EU → EUR
+3. TAX ID FORMAT → COUNTRY → CURRENCY  (very reliable)
+   NIT  "900.xxx.xxx-x"   → Colombia → COP
+   RFC  "XXXX999999XXX"   → Mexico   → MXN
+   CUIT "XX-XXXXXXXX-X"   → Argentina → ARS
+   RUT  "XX.XXX.XXX-X"    → Chile    → CLP
+   RUC                    → Peru → PEN  or  Ecuador → USD
+   CNPJ / CPF             → Brazil   → BRL
+   EIN / FEIN             → USA      → USD
+   VAT "GB…"              → UK       → GBP
+   VAT "DE/FR/ES/IT…"     → EU member → EUR
    Confidence 0.90.
 
 4. SYMBOL + ADDRESS CONTEXT
    "$" + Colombian city (Bogotá, Medellín, Cali, Barranquilla…) → COP
-   "$" + Mexican city (CDMX, Monterrey, Guadalajara…) → MXN
-   "$" + Argentine city (Buenos Aires, Córdoba, Rosario…) → ARS
-   "$" + Chilean city (Santiago, Valparaíso…) → CLP
-   "$" + US city / state → USD
-   "€" → EUR   "£" → GBP
+   "$" + Mexican city (CDMX, Monterrey, Guadalajara…)           → MXN
+   "$" + Argentine city (Buenos Aires, Córdoba, Rosario…)        → ARS
+   "$" + Chilean city (Santiago, Valparaíso…)                    → CLP
+   "$" + US / CA city or state                                   → USD
+   "€" → EUR  |  "£" → GBP
    Confidence 0.80.
 
-5. AMOUNT MAGNITUDE HEURISTIC (last resort, low confidence)
-   Amounts > 100,000 with "$" and no US/CA address → likely Latin American peso (COP most common)
-   Confidence 0.65, set is_uncertain: true.
+5. AMOUNT MAGNITUDE (last resort)
+   Amounts > 100,000 with "$" and no US/CA address → likely Latin American peso
+   (COP most common). Confidence 0.65, set is_uncertain: true.
 
-══ NUMBER FORMAT RULES ══════════════════════════════════════════════
-Latin American and European invoices use DIFFERENT separators than US:
-  "1.200.000"       → 1200000   (period = thousands separator)
-  "1.200.000,00"    → 1200000   (period = thousands, comma = decimal)
-  "107.100"         → 107100    (if context suggests large currency like COP)
-  "1.250,50"        → 1250.50   (European: comma = decimal)
-  "1,250.50"        → 1250.50   (US: comma = thousands, period = decimal)
-Always return amounts as plain JS numbers (no commas, no symbols, no strings).
-When in doubt about separators, use the currency and country context.
+══ NUMBER FORMAT RULES ══════════════════════════════════════════════════════════
+Latin American and European invoices use DIFFERENT separators than the US:
+  "1.200.000"       → 1200000      (period = thousands)
+  "1.200.000,00"    → 1200000.00   (period = thousands, comma = decimal)
+  "1.250,50"        → 1250.50      (European: comma = decimal)
+  "1,250.50"        → 1250.50      (US: comma = thousands)
+Always return amounts as plain JS numbers. No commas, no symbols, no strings.
 
-══ CONFIDENCE SCORING ═══════════════════════════════════════════════
-1.00  Field is explicitly and clearly present, no ambiguity
-0.95  Field clearly present, very minor OCR uncertainty
-0.85  Field present but required minor inference
-0.75  Field inferred from strong contextual signals → is_uncertain: false
-0.65  Field inferred from weak/indirect signals     → is_uncertain: true
-<0.65 Very uncertain or speculative                → is_uncertain: true
+══ CONFIDENCE SCORING ═══════════════════════════════════════════════════════════
+1.00  Field explicitly and clearly present, no ambiguity
+0.95  Clearly present, very minor OCR uncertainty
+0.85  Present but required minor inference          → is_uncertain: false
+0.75  Inferred from strong contextual signals       → is_uncertain: false
+0.65  Inferred from weak/indirect signals           → is_uncertain: true
+<0.65 Highly uncertain or speculative               → is_uncertain: true
 
-══ FIELD-SPECIFIC RULES ═════════════════════════════════════════════
-vendor_name:     Company/person ISSUING the invoice (not the buyer/client)
-vendor_address:  Full address of the vendor including city, country if present
-invoice_number:  Look for "Factura No.", "Invoice #", "No. Factura", "Nro.", "Número".
-                 CUFE, CUDE, UUID are NOT the invoice number — ignore them.
-issue_date:      Date invoice was created/issued. ISO format YYYY-MM-DD.
-due_date:        Payment due date. If not explicitly stated, return null.
-subtotal:        Amount before tax. If only total is shown, return null for subtotal.
-tax:             IVA / VAT / GST amount as a number. Look for "IVA 19%", "IVA", "Tax".
-total:           Grand total. Look for "TOTAL", "Total a Pagar", "Total Factura".
-bank_details:    Concatenate all payment info: bank name, account number, routing, IBAN, etc.
-po_reference:    Purchase order number. Look for "O.C.", "Orden de Compra", "P.O.", "PO#".
+══ FIELD-SPECIFIC RULES ═════════════════════════════════════════════════════════
+vendor_name:     Company/person ISSUING the invoice (not the buyer).
+vendor_address:  Full address of the vendor including city and country if present.
+vendor_tax_id:   NIT / RFC / CUIT / RUC of the VENDOR (issuing party).
+invoice_number:  "Factura No.", "Invoice #", "No. Factura", "Nro.", "Número".
+                 CUFE, CUDE, UUID (long hex strings) are NOT invoice numbers.
+issue_date:      Date the invoice was created. ISO format YYYY-MM-DD.
+due_date:        Payment deadline. Return null if not explicitly stated.
+subtotal:        Amount before tax. Return null if only the total is shown.
+tax:             IVA / VAT / GST / impuesto amount as a number.
+total:           Grand total. "TOTAL", "Total a Pagar", "Total Factura".
+po_reference:    "O.C.", "Orden de Compra", "P.O.", "PO#".
 payment_terms:   e.g. "Net 30", "Contado", "30 días", "Pago inmediato".
-line_items:      Extract ALL rows from itemised tables. Include service descriptions.`;
+bank_details:    Concatenate bank name, account number, routing, IBAN into one string.
+buyer_name:      Name of the BUYER / Adquiriente / Cliente (not the vendor).
+buyer_tax_id:    NIT / RFC / CUIT of the buyer.
+buyer_address:   Full address of the buyer.
+concept:         Brief summary of what the invoice is for (first line of services).
+project_name:    Obra / proyecto / project name if mentioned.
+project_address: Physical address of the project / obra.
+project_city:    City where the project is located.
+notes:           Observations, payment notes, or footer text.`;
 
-// ─── User prompt ──────────────────────────────────────────────────────────────
-// Short and structural — the heavy lifting is in the system prompt above.
-const USER_PROMPT = `Analyse this invoice document and extract all structured data.
-Return ONLY valid JSON matching this exact schema — no preamble, no markdown fences:
+// ── Extraction JSON schema (user prompt) ──────────────────────────────────────
+const EXTRACTION_USER_PROMPT = `Analyse the invoice text below and extract all structured data.
+Return ONLY valid JSON — no preamble, no markdown fences, no explanation.
 
 {
-  "vendor_name":    { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "vendor_address": { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "invoice_number": { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "issue_date":     { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
-  "due_date":       { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
-  "subtotal":       { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "tax":            { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "total":          { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "currency":       { "value": "ISO 4217 code or null", "confidence": 0.0, "is_uncertain": false },
-  "po_reference":   { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "payment_terms":  { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "bank_details":   { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "vendor_name":          { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "vendor_address":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "vendor_tax_id":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "invoice_number":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "issue_date":           { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
+  "due_date":             { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
+  "subtotal":             { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "tax":                  { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "total":                { "value": null, "confidence": 0.0, "is_uncertain": false },
+  "currency":             { "value": "ISO 4217 code or null", "confidence": 0.0, "is_uncertain": false },
+  "po_reference":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "payment_terms":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "bank_details":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "buyer_name":           { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "buyer_tax_id":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "buyer_address":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "concept":              { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "project_name":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "project_address":      { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "project_city":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
+  "notes":                { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
   "line_items": [
     {
       "description": "string or null",
@@ -149,40 +198,51 @@ Return ONLY valid JSON matching this exact schema — no preamble, no markdown f
       "confidence":  0.0
     }
   ]
-}`;
+}
 
-/**
- * Extract structured data from an invoice file (image or PDF).
- * Returns a typed InvoiceExtraction object.
- */
-export async function extractInvoice(
-  fileBuffer: Buffer,
+Invoice text:
+`;
+
+// ── OCR-only system prompt ─────────────────────────────────────────────────────
+const OCR_SYSTEM_PROMPT =
+  "You are an OCR engine. Extract ALL text from the invoice document exactly as it appears. " +
+  "Preserve every number, date, address, table row, and label. " +
+  "Do not interpret, summarise, or restructure — output only the raw visible text.";
+
+// ── Path 1: XML → deterministic parse ─────────────────────────────────────────
+function handleXml(buffer: Buffer): InvoiceExtraction {
+  const xmlText = buffer.toString("utf-8");
+  return parseInvoiceXML(xmlText);
+}
+
+// ── Path 2: Image / PDF → GPT-4o OCR → clean → GPT-4o-mini extract ───────────
+async function handleImageOrPdf(
+  buffer: Buffer,
   mimeType: string
 ): Promise<InvoiceExtraction> {
+  // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contentParts: any[] = [];
+  const ocrParts: any[] = [];
   let uploadedFileId: string | null = null;
 
   if (mimeType === "application/pdf") {
-    // PDFs must be uploaded to the OpenAI Files API first, then referenced by ID
     const uploaded = await getClient().files.create({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      file: new File([new Uint8Array(fileBuffer)], "invoice.pdf", { type: "application/pdf" }) as any,
+      file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       purpose: "user_data" as any,
     });
     uploadedFileId = uploaded.id;
-    contentParts.push({ type: "file", file: { file_id: uploadedFileId } });
+    ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
   } else {
-    // Images: send as base64 data URL via the vision API
-    const base64Data = bufferToBase64(fileBuffer.buffer as ArrayBuffer);
+    const base64Data = bufferToBase64(buffer.buffer as ArrayBuffer);
     const imageType = mimeType.includes("png")
       ? "image/png"
       : mimeType.includes("webp")
       ? "image/webp"
       : "image/jpeg";
 
-    contentParts.push({
+    ocrParts.push({
       type: "image_url",
       image_url: {
         url: `data:${imageType};base64,${base64Data}`,
@@ -191,60 +251,112 @@ export async function extractInvoice(
     });
   }
 
-  // Document content first, then the extraction instruction
-  contentParts.push({ type: "text", text: USER_PROMPT });
+  ocrParts.push({
+    type: "text",
+    text: "Extract all text from this invoice document exactly as it appears.",
+  });
 
+  // ── Step B: Call GPT-4o for OCR ───────────────────────────────────────
+  let rawOcrText = "";
   try {
-    const response = await getClient().chat.completions.create({
-      model: MODEL,
-      max_tokens: 4096,
+    const ocrResp = await getClient().chat.completions.create({
+      model: OCR_MODEL,
+      max_tokens: 2048,
       temperature: 0,
-      response_format: { type: "json_object" },
       messages: [
-        // System message carries the standing extraction rules —
-        // GPT-4o follows these much more reliably than inline instructions
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: contentParts },
+        { role: "system", content: OCR_SYSTEM_PROMPT },
+        { role: "user", content: ocrParts },
       ],
     });
-
-    const text = response.choices[0]?.message?.content ?? "";
-
-    // Strip any accidental markdown fences then parse
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
-    let parsed: InvoiceExtraction;
-    try {
-      parsed = JSON.parse(cleaned) as InvoiceExtraction;
-    } catch {
-      throw new Error(
-        `OpenAI returned invalid JSON. Raw response: ${text.slice(0, 500)}`
-      );
-    }
-
-    // Ensure line_items is always an array
-    if (!Array.isArray(parsed.line_items)) {
-      parsed.line_items = [];
-    }
-
-    return parsed;
+    rawOcrText = ocrResp.choices[0]?.message?.content ?? "";
   } finally {
-    // Clean up the uploaded PDF file (non-fatal if this fails)
+    // Clean up uploaded PDF file regardless of OCR success/failure
     if (uploadedFileId) {
       getClient().files.delete(uploadedFileId).catch(() => {});
     }
   }
+
+  // ── Step C: Clean the OCR text ────────────────────────────────────────
+  const cleanedText = cleanOcrText(rawOcrText);
+
+  // ── Step D: Call GPT-4o-mini for structured extraction ────────────────
+  // Truncate to 4000 chars to stay within token budget
+  const truncatedText = cleanedText.slice(0, 4000);
+
+  const extractResp = await Promise.race([
+    getClient().chat.completions.create({
+      model: EXTRACT_MODEL,
+      max_tokens: 1500,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+        { role: "user", content: EXTRACTION_USER_PROMPT + truncatedText },
+      ],
+    }),
+    // 25-second timeout
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("GPT-4o-mini extraction timed out")), 25_000)
+    ),
+  ]);
+
+  const raw = extractResp.choices[0]?.message?.content ?? "";
+  const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+  let parsed: InvoiceExtraction;
+  try {
+    parsed = JSON.parse(cleaned) as InvoiceExtraction;
+  } catch {
+    throw new Error(
+      `GPT-4o-mini returned invalid JSON. Raw response: ${raw.slice(0, 500)}`
+    );
+  }
+
+  if (!Array.isArray(parsed.line_items)) parsed.line_items = [];
+  return parsed;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Extract structured data from an invoice file.
+ *
+ * Routing:
+ *   XML                → deterministic XML parser (no AI, no cost)
+ *   Image / PDF        → GPT-4o OCR → 8-step clean → GPT-4o-mini extract
+ */
+export async function extractInvoice(
+  fileBuffer: Buffer,
+  mimeType: string
+): Promise<InvoiceExtraction> {
+  const isXml =
+    mimeType === "text/xml" ||
+    mimeType === "application/xml" ||
+    mimeType === "text/plain"; // .xml files sometimes sniff as text/plain
+
+  if (isXml) {
+    // For text/plain we do a quick sanity check — if it starts with '<' it's XML
+    if (mimeType === "text/plain") {
+      const peek = fileBuffer.slice(0, 20).toString("utf-8").trimStart();
+      if (!peek.startsWith("<")) {
+        // Real plain-text (rare edge case) — fall through to AI path
+        return handleImageOrPdf(fileBuffer, mimeType);
+      }
+    }
+    return handleXml(fileBuffer);
+  }
+
+  return handleImageOrPdf(fileBuffer, mimeType);
 }
 
 /**
- * Detect if a new invoice is a duplicate of an existing one.
- * Uses invoice number + vendor name hashing.
+ * Build a deduplication key from invoice number + vendor name.
+ * Returns null if both are absent.
  */
 export function buildDuplicateKey(
   invoiceNumber: string | null,
   vendorName: string | null
 ): string | null {
   if (!invoiceNumber && !vendorName) return null;
-  const combined = `${(vendorName ?? "").toLowerCase().trim()}|${(invoiceNumber ?? "").toLowerCase().trim()}`;
-  return combined;
+  return `${(vendorName ?? "").toLowerCase().trim()}|${(invoiceNumber ?? "").toLowerCase().trim()}`;
 }

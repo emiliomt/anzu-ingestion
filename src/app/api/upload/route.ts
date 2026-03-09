@@ -228,8 +228,9 @@ async function processInvoice(
       }
     }
 
-    // Store extracted fields
-    const SCALAR_FIELDS = [
+    // Store extracted fields — core fields are always written; extended fields
+    // (vendor_tax_id, buyer_*, concept, project_*, notes) are written when present.
+    const CORE_FIELDS = [
       "vendor_name",
       "vendor_address",
       "invoice_number",
@@ -244,7 +245,24 @@ async function processInvoice(
       "bank_details",
     ] as const;
 
-    const fieldInserts = SCALAR_FIELDS.map((key) => {
+    const EXTENDED_FIELDS = [
+      "vendor_tax_id",
+      "buyer_name",
+      "buyer_tax_id",
+      "buyer_address",
+      "concept",
+      "project_name",
+      "project_address",
+      "project_city",
+      "description_summary",
+      "notes",
+    ] as const;
+
+    // Combine for low-confidence flagging
+    const SCALAR_FIELDS = [...CORE_FIELDS, ...EXTENDED_FIELDS] as const;
+
+    // Core fields — always written (value may be null if not found)
+    const coreInserts = CORE_FIELDS.map((key) => {
       const field = extraction[key];
       return {
         invoiceId,
@@ -255,7 +273,27 @@ async function processInvoice(
       };
     });
 
-    await prisma.extractedField.createMany({ data: fieldInserts });
+    // Extended fields — only written when the field is present in the extraction
+    const extendedInserts = EXTENDED_FIELDS
+      .filter((key) => {
+        const f = extraction[key as keyof typeof extraction];
+        return f !== undefined && (f as { value?: unknown }).value !== null;
+      })
+      .map((key) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const field = extraction[key as keyof typeof extraction] as any;
+        return {
+          invoiceId,
+          fieldName: key,
+          value: field?.value != null ? String(field.value) : null,
+          confidence: field?.confidence ?? null,
+          isUncertain: field?.is_uncertain ?? false,
+        };
+      });
+
+    await prisma.extractedField.createMany({
+      data: [...coreInserts, ...extendedInserts],
+    });
 
     // Store line items
     if (extraction.line_items.length > 0) {
@@ -275,8 +313,9 @@ async function processInvoice(
     const flags: string[] = [];
     if (isDuplicate) flags.push("duplicate");
 
-    // Flag low-confidence fields
-    const lowConfFields = SCALAR_FIELDS.filter((key) => {
+    // Flag low-confidence fields (only check core fields — extended fields
+    // being absent is normal and should not trigger a low-confidence flag)
+    const lowConfFields = CORE_FIELDS.filter((key) => {
       const c = extraction[key]?.confidence;
       return c != null && c < 0.85;
     });

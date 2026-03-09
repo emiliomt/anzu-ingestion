@@ -64,6 +64,9 @@ export function isValidMime(mime: string): boolean {
     "image/heic",
     "image/tiff",
     "image/webp",
+    // Colombian UBL XML electronic invoices
+    "text/xml",
+    "application/xml",
   ];
   return allowed.includes(mime);
 }
