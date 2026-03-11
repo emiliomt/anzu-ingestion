@@ -167,9 +167,8 @@ const COUNTRY_NAMES: Record<string, string> = {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
-  const [origin] = useState(() =>
-    typeof window !== "undefined" ? window.location.origin : ""
-  );
+  const [origin, setOrigin] = useState("");
+  useEffect(() => { setOrigin(window.location.origin); }, []);
 
   const emailWebhook    = `${origin}/api/webhooks/email`;
   const whatsappWebhook = `${origin}/api/webhooks/whatsapp`;
