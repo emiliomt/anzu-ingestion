@@ -25,6 +25,7 @@ ENV NEXT_OUTPUT=standalone
 # DB queries are made during `next build` — this just satisfies the env check.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN npm run build
+# cache-bust: 2026-03-13
 
 # ---- Runner ----
 FROM base AS runner

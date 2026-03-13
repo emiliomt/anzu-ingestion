@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { Sparkles, Check, X, RefreshCw, Loader2, GitMerge, ChevronDown } from "lucide-react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
+import Link from "next/link";
+import { Sparkles, Check, X, RefreshCw, Loader2, GitMerge, ChevronDown, ChevronLeft } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 interface MatchRow {
@@ -44,7 +45,7 @@ function ConfidenceBadge({ value }: { value: number | null }) {
   return <span className={`text-xs font-medium ${color}`}>{pct}%</span>;
 }
 
-export default function MatchingPage() {
+function MatchingPageInner() {
   const searchParams = useSearchParams();
   const [filter, setFilter] = useState<"unmatched" | "pending" | "confirmed" | "all">(
     (searchParams.get("filter") as "pending") ?? "unmatched"
@@ -124,6 +125,13 @@ export default function MatchingPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <div className="flex-1">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors mb-2"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Menu
+          </Link>
           <h1 className="text-2xl font-bold text-gray-900">Match Invoices</h1>
           <p className="text-gray-500 text-sm mt-0.5">
             AI-powered matching of processed invoices to Projects, POs, or Caja Chica.
@@ -286,5 +294,17 @@ export default function MatchingPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function MatchingPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center gap-2 text-gray-400 py-12 justify-center">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+      </div>
+    }>
+      <MatchingPageInner />
+    </Suspense>
   );
 }
