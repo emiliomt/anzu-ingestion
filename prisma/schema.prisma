@@ -121,6 +121,8 @@ model Project {
   code           String?         @unique
   address        String?
   city           String?
+  vat            String?         // Tax/NIT number
+  supervisor     String?         // Person responsible for the project
   budget         Float?
   currency       String          @default("COP")
   status         String          @default("active") // active | closed | on_hold

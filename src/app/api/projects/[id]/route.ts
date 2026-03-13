@@ -36,6 +36,8 @@ export async function PATCH(
       ...(body.budget !== undefined ? { budget: body.budget !== null ? Number(body.budget) : null } : {}),
       ...(body.currency !== undefined ? { currency: String(body.currency) } : {}),
       ...(body.status !== undefined ? { status: String(body.status) } : {}),
+      ...(body.vat !== undefined ? { vat: body.vat ? String(body.vat) : null } : {}),
+      ...(body.supervisor !== undefined ? { supervisor: body.supervisor ? String(body.supervisor) : null } : {}),
       ...(body.description !== undefined ? { description: body.description ? String(body.description) : null } : {}),
       ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(String(body.startDate)) : null } : {}),
       ...(body.endDate !== undefined ? { endDate: body.endDate ? new Date(String(body.endDate)) : null } : {}),

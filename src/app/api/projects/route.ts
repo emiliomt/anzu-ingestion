@@ -34,6 +34,8 @@ export async function GET(request: NextRequest) {
       code: p.code,
       address: p.address,
       city: p.city,
+      vat: p.vat,
+      supervisor: p.supervisor,
       budget: p.budget,
       currency: p.currency,
       status: p.status,
@@ -53,6 +55,8 @@ export async function POST(request: NextRequest) {
     code?: string;
     address?: string;
     city?: string;
+    vat?: string;
+    supervisor?: string;
     budget?: number;
     currency?: string;
     status?: string;
@@ -71,6 +75,8 @@ export async function POST(request: NextRequest) {
       code: body.code?.trim() || null,
       address: body.address?.trim() || null,
       city: body.city?.trim() || null,
+      vat: body.vat?.trim() || null,
+      supervisor: body.supervisor?.trim() || null,
       budget: body.budget ?? null,
       currency: body.currency ?? "COP",
       status: body.status ?? "active",

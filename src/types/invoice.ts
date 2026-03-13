@@ -92,6 +92,8 @@ export interface Project {
   code: string | null;
   address: string | null;
   city: string | null;
+  vat: string | null;
+  supervisor: string | null;
   budget: number | null;
   currency: string;
   status: ProjectStatus;
