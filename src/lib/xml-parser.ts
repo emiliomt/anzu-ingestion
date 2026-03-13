@@ -258,6 +258,7 @@ export function parseInvoiceXML(xmlContent: string): InvoiceExtraction {
       quantity: qty != null && !isNaN(qty) ? qty : null,
       unit_price: parseAmount(getTagText(block, "PriceAmount")),
       line_total: parseAmount(getTagText(block, "LineExtensionAmount")),
+      category: null, // XML invoices don't carry explicit category tags
       confidence: 0.95,
     });
   }

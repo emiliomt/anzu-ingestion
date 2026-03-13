@@ -31,6 +31,23 @@ export interface ExtractionOptions {
   amount_format?: string;
   /** GPT-4o-mini timeout in milliseconds (default: 25 000) */
   timeout_ms?: number;
+  /**
+   * Called with the cleaned OCR text AFTER the OCR pass but BEFORE the
+   * extraction pass.  Returns a few-shot prompt section to inject into the
+   * system prompt (or "" if nothing to inject).
+   * This is where vendor-aware correction examples are provided.
+   */
+  buildFewShot?: (ocrText: string) => Promise<string>;
+  /**
+   * Fine-tuned model ID to use instead of the default gpt-4o-mini.
+   * Set automatically from app settings once a fine-tuning job completes.
+   */
+  fineTunedModelId?: string | null;
+  /**
+   * List of field keys to include in extraction.
+   * When omitted or empty, all fields are extracted.
+   */
+  enabled_fields?: string[];
 }
 
 // ── OpenAI client (lazy — constructor must NOT run at Next.js build time) ─────
@@ -53,11 +70,22 @@ export interface ExtractionField {
   is_uncertain?: boolean;
 }
 
+export type LineItemCategory =
+  | "material"
+  | "labor"
+  | "equipment"
+  | "freight"
+  | "overhead"
+  | "tax"
+  | "discount"
+  | "other";
+
 export interface LineItemExtraction {
   description: string | null;
   quantity:    number | null;
   unit_price:  number | null;
   line_total:  number | null;
+  category:    LineItemCategory | null;
   confidence:  number;
 }
 
@@ -175,47 +203,78 @@ concept:         Brief summary of what the invoice is for (first line of service
 project_name:    Obra / proyecto / project name if mentioned.
 project_address: Physical address of the project / obra.
 project_city:    City where the project is located.
-notes:           Observations, payment notes, or footer text.`;
+notes:           Observations, payment notes, or footer text.
 
-// ── Extraction JSON schema (user prompt) ──────────────────────────────────────
-const EXTRACTION_USER_PROMPT = `Analyse the invoice text below and extract all structured data.
+══ LINE ITEM CLASSIFICATION ════════════════════════════════════════════════
+Classify every line item into exactly one of the following categories:
+
+  material   — raw materials, supplies, parts, products, goods, hardware,
+               components, consumables (e.g. "concrete", "steel pipe", "lumber")
+  labor      — professional services, installation, workforce, personnel,
+               man-hours, operator fees (e.g. "mano de obra", "installation labor")
+  equipment  — machinery, tools, vehicles, rental equipment, scaffolding
+               (e.g. "excavator rental", "alquiler grúa", "equipment lease")
+  freight    — shipping, transport, delivery, logistics, import costs
+               (e.g. "flete", "shipping & handling", "delivery charge")
+  overhead   — management fees, administrative costs, overhead surcharges,
+               mobilization, insurance (e.g. "administración", "overhead 10%")
+  tax        — taxes, duties, levies, IVA, VAT, retención, withholding
+               (e.g. "IVA 19%", "retención fuente", "GST")
+  discount   — discounts, credits, rebates (usually negative amounts)
+               (e.g. "descuento 5%", "credit note", "rebate")
+  other      — anything not clearly matching the categories above
+
+Rules:
+- Base the classification on the description text only.
+- Set category: null ONLY when description is completely blank.
+- When the description is ambiguous, choose the most likely category and
+  lower the confidence score for that line item.`;
+
+// ── Per-field JSON schema templates ──────────────────────────────────────────
+const FIELD_TEMPLATES: Record<string, string> = {
+  vendor_name:     `  "vendor_name":          { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  vendor_address:  `  "vendor_address":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  vendor_tax_id:   `  "vendor_tax_id":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  invoice_number:  `  "invoice_number":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  issue_date:      `  "issue_date":           { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false }`,
+  due_date:        `  "due_date":             { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false }`,
+  subtotal:        `  "subtotal":             { "value": null, "confidence": 0.0, "is_uncertain": false }`,
+  tax:             `  "tax":                  { "value": null, "confidence": 0.0, "is_uncertain": false }`,
+  total:           `  "total":                { "value": null, "confidence": 0.0, "is_uncertain": false }`,
+  currency:        `  "currency":             { "value": "ISO 4217 code or null", "confidence": 0.0, "is_uncertain": false }`,
+  po_reference:    `  "po_reference":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  payment_terms:   `  "payment_terms":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  bank_details:    `  "bank_details":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  buyer_name:      `  "buyer_name":           { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  buyer_tax_id:    `  "buyer_tax_id":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  buyer_address:   `  "buyer_address":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  concept:         `  "concept":              { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  project_name:    `  "project_name":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  project_address: `  "project_address":      { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  project_city:    `  "project_city":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  notes:           `  "notes":                { "value": "string or null", "confidence": 0.0, "is_uncertain": false }`,
+  line_items:      `  "line_items": [\n    {\n      "description": "string or null",\n      "quantity":    null,\n      "unit_price":  null,\n      "line_total":  null,\n      "category":    "material | labor | equipment | freight | overhead | tax | discount | other | null",\n      "confidence":  0.0\n    }\n  ]`,
+};
+
+// ── Build extraction user prompt from the enabled field list ──────────────────
+function buildExtractionUserPrompt(enabledFields?: string[]): string {
+  const ordered = Object.keys(FIELD_TEMPLATES);
+  const active = enabledFields && enabledFields.length > 0
+    ? ordered.filter((f) => enabledFields.includes(f))
+    : ordered;
+
+  const schemaLines = active.map((f) => FIELD_TEMPLATES[f]).filter(Boolean).join(",\n");
+
+  return `Analyse the invoice text below and extract all structured data.
 Return ONLY valid JSON — no preamble, no markdown fences, no explanation.
 
 {
-  "vendor_name":          { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "vendor_address":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "vendor_tax_id":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "invoice_number":       { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "issue_date":           { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
-  "due_date":             { "value": "YYYY-MM-DD or null", "confidence": 0.0, "is_uncertain": false },
-  "subtotal":             { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "tax":                  { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "total":                { "value": null, "confidence": 0.0, "is_uncertain": false },
-  "currency":             { "value": "ISO 4217 code or null", "confidence": 0.0, "is_uncertain": false },
-  "po_reference":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "payment_terms":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "bank_details":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "buyer_name":           { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "buyer_tax_id":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "buyer_address":        { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "concept":              { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "project_name":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "project_address":      { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "project_city":         { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "notes":                { "value": "string or null", "confidence": 0.0, "is_uncertain": false },
-  "line_items": [
-    {
-      "description": "string or null",
-      "quantity":    null,
-      "unit_price":  null,
-      "line_total":  null,
-      "confidence":  0.0
-    }
-  ]
+${schemaLines}
 }
 
 Invoice text:
 `;
+}
 
 // ── OCR-only system prompt ─────────────────────────────────────────────────────
 const OCR_SYSTEM_PROMPT =
@@ -255,7 +314,7 @@ async function handleImageOrPdf(
   buffer: Buffer,
   mimeType: string,
   opts: ExtractionOptions = {}
-): Promise<InvoiceExtraction> {
+): Promise<{ result: InvoiceExtraction; ocrText: string }> {
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ocrParts: any[] = [];
@@ -315,22 +374,34 @@ async function handleImageOrPdf(
   // ── Step C: Clean the OCR text ────────────────────────────────────────
   const cleanedText = cleanOcrText(rawOcrText);
 
+  // ── Step C2: Build few-shot examples (vendor-aware, from correction logs) ──
+  let fewShotSection = "";
+  if (opts.buildFewShot) {
+    try {
+      fewShotSection = await opts.buildFewShot(cleanedText);
+    } catch {
+      // Non-fatal: extraction still proceeds without few-shot examples
+    }
+  }
+
   // ── Step D: Call GPT-4o-mini for structured extraction ────────────────
   // Truncate to 4000 chars to stay within token budget
   const truncatedText = cleanedText.slice(0, 4000);
 
   const timeoutMs = opts.timeout_ms ?? 25_000;
-  const systemPrompt = EXTRACTION_SYSTEM_PROMPT + buildContextSection(opts);
+  const systemPrompt = EXTRACTION_SYSTEM_PROMPT + buildContextSection(opts) + fewShotSection;
+  const extractModel = opts.fineTunedModelId ?? EXTRACT_MODEL;
+  const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
   const extractResp = await Promise.race([
     getClient().chat.completions.create({
-      model: EXTRACT_MODEL,
+      model: extractModel,
       max_tokens: 1500,
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: EXTRACTION_USER_PROMPT + truncatedText },
+        { role: "user", content: userPrompt + truncatedText },
       ],
     }),
     new Promise<never>((_, reject) =>
@@ -351,42 +422,53 @@ async function handleImageOrPdf(
   }
 
   if (!Array.isArray(parsed.line_items)) parsed.line_items = [];
-  return parsed;
+  return { result: parsed, ocrText: cleanedText };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Extract structured data from an invoice file.
+ * Backward-compatible: returns only the extraction result.
  *
  * Routing:
  *   XML                → deterministic XML parser (no AI, no cost)
  *   Image / PDF        → GPT-4o OCR → 8-step clean → GPT-4o-mini extract
  *
- * @param opts  Optional settings injected from the app Settings page
- *              (default_country, default_currency, document_language,
- *              amount_format, timeout_ms).  If omitted, sensible defaults apply.
+ * @param opts  Optional settings injected from the app Settings page.
+ *              Pass `buildFewShot` to inject vendor-aware correction examples.
  */
 export async function extractInvoice(
   fileBuffer: Buffer,
   mimeType: string,
   opts: ExtractionOptions = {}
 ): Promise<InvoiceExtraction> {
+  const { result } = await extractInvoiceWithOcr(fileBuffer, mimeType, opts);
+  return result;
+}
+
+/**
+ * Like extractInvoice but also returns the cleaned OCR text.
+ * Use this in the upload pipeline to persist ocrText for training data.
+ */
+export async function extractInvoiceWithOcr(
+  fileBuffer: Buffer,
+  mimeType: string,
+  opts: ExtractionOptions = {}
+): Promise<{ result: InvoiceExtraction; ocrText: string | null }> {
   const isXml =
     mimeType === "text/xml" ||
     mimeType === "application/xml" ||
     mimeType === "text/plain"; // .xml files sometimes sniff as text/plain
 
   if (isXml) {
-    // For text/plain we do a quick sanity check — if it starts with '<' it's XML
     if (mimeType === "text/plain") {
       const peek = fileBuffer.slice(0, 20).toString("utf-8").trimStart();
       if (!peek.startsWith("<")) {
-        // Real plain-text (rare edge case) — fall through to AI path
         return handleImageOrPdf(fileBuffer, mimeType, opts);
       }
     }
-    return handleXml(fileBuffer);
+    return { result: handleXml(fileBuffer), ocrText: null };
   }
 
   return handleImageOrPdf(fileBuffer, mimeType, opts);

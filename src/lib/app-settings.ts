@@ -35,7 +35,31 @@ export interface AppSettings {
   auto_approve_threshold: number | null;
   /** Whether to detect and flag duplicate invoices */
   flag_duplicates: boolean;
+
+  // ── Fine-tuning ───────────────────────────────────────────────────────────
+  /**
+   * Fine-tuned model ID (e.g. "ft:gpt-4o-mini-2024-07-18:anzu-invoice:xxxx").
+   * When set, extraction uses this model instead of gpt-4o-mini.
+   * null = not fine-tuned yet.
+   */
+  finetune_model_id: string | null;
+
+  // ── Field selection ───────────────────────────────────────────────────────
+  /**
+   * List of field keys to include in extraction.
+   * When empty or omitted, all fields are extracted.
+   */
+  extraction_fields: string[];
 }
+
+// ── All extractable field keys ─────────────────────────────────────────────────
+
+export const ALL_EXTRACTION_FIELDS = [
+  "vendor_name", "vendor_address", "invoice_number", "issue_date", "due_date",
+  "subtotal", "tax", "total", "currency", "po_reference", "payment_terms", "bank_details",
+  "vendor_tax_id", "buyer_name", "buyer_tax_id", "buyer_address",
+  "concept", "project_name", "project_address", "project_city", "notes", "line_items",
+] as const;
 
 // ── Defaults (used when no DB row exists for a key) ────────────────────────────
 
@@ -48,6 +72,8 @@ export const SETTING_DEFAULTS: AppSettings = {
   extraction_timeout_seconds: 45,
   auto_approve_threshold:     null,
   flag_duplicates:            true,
+  finetune_model_id:          null,
+  extraction_fields:          [...ALL_EXTRACTION_FIELDS],
 };
 
 // ── Country → default currency map ────────────────────────────────────────────
@@ -101,6 +127,22 @@ export async function getSettings(): Promise<AppSettings> {
       get("flag_duplicates") !== undefined
         ? get("flag_duplicates") === "true"
         : SETTING_DEFAULTS.flag_duplicates,
+
+    finetune_model_id:
+      get("finetune_model_id") !== undefined && get("finetune_model_id") !== ""
+        ? get("finetune_model_id")!
+        : SETTING_DEFAULTS.finetune_model_id,
+
+    extraction_fields: (() => {
+      const raw = get("extraction_fields");
+      if (!raw || raw === "null") return SETTING_DEFAULTS.extraction_fields;
+      try {
+        const parsed = JSON.parse(raw) as string[];
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : SETTING_DEFAULTS.extraction_fields;
+      } catch {
+        return SETTING_DEFAULTS.extraction_fields;
+      }
+    })(),
   };
 }
 

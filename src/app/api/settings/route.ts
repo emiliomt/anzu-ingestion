@@ -22,6 +22,8 @@ export async function POST(req: Request) {
     for (const [key, val] of Object.entries(body)) {
       if (val === null || val === undefined) {
         partial[key] = "null";
+      } else if (Array.isArray(val)) {
+        partial[key] = JSON.stringify(val);
       } else {
         partial[key] = String(val);
       }

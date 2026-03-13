@@ -58,6 +58,7 @@ export async function GET(
       quantity: li.quantity,
       unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
+      category: li.category ?? null,
       confidence: li.confidence,
     })),
     events: invoice.events.map((e) => ({
@@ -86,6 +87,13 @@ export async function PATCH(
 
   // Update extracted field
   if (body.fieldId) {
+    // Capture original value before overwriting (needed for training data)
+    const existing = await prisma.extractedField.findUnique({
+      where: { id: body.fieldId },
+      select: { value: true },
+    });
+    const originalValue = existing?.value ?? null;
+
     await prisma.extractedField.update({
       where: { id: body.fieldId },
       data: {
@@ -94,6 +102,19 @@ export async function PATCH(
       },
     });
 
+    // Log the correction for few-shot learning and fine-tuning
+    if (originalValue !== body.value) {
+      await prisma.correctionLog.create({
+        data: {
+          invoiceId: id,
+          fieldName: body.fieldName ?? "unknown",
+          originalValue,
+          correctedValue: body.value ?? null,
+          correctedBy: body.reviewedBy ?? "admin",
+        },
+      });
+    }
+
     await prisma.ingestionEvent.create({
       data: {
         invoiceId: id,
@@ -101,6 +122,7 @@ export async function PATCH(
         metadata: JSON.stringify({
           fieldId: body.fieldId,
           fieldName: body.fieldName,
+          originalValue,
           newValue: body.value,
           updatedBy: body.reviewedBy ?? "admin",
         }),

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   X, ExternalLink, CheckCircle, Edit2, Save, AlertTriangle,
-  FileText, Calendar, DollarSign, Hash, Clock
+  FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge
 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceDetail as InvoiceDetailType, ExtractedFieldData } from "@/types/invoice";
@@ -44,6 +44,23 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [classifying, setClassifying] = useState(false);
+  const [matchLabel, setMatchLabel] = useState<string | null>(null);
+  const [matchConfirmed, setMatchConfirmed] = useState(false);
+
+  useEffect(() => {
+    // Load match status
+    fetch(`/api/matching/list?filter=all`)
+      .then((r) => r.json() as Promise<{ id: string; match: { matchLabel: string; isConfirmed: boolean } | null }[]>)
+      .then((rows) => {
+        const row = rows.find((r) => r.id === invoiceId);
+        if (row?.match) {
+          setMatchLabel(row.match.matchLabel);
+          setMatchConfirmed(row.match.isConfirmed);
+        }
+      })
+      .catch(() => {});
+  }, [invoiceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +129,20 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
     }
   };
 
+  const handleClassify = async () => {
+    setClassifying(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/classify`, { method: "POST" });
+      if (!res.ok) throw new Error("Classify request failed");
+      const data = await res.json() as { lineItems: InvoiceDetailType["lineItems"] };
+      setInvoice((prev) => prev ? { ...prev, lineItems: data.lineItems } : prev);
+    } catch (err) {
+      console.error("[Classify]", err);
+    } finally {
+      setClassifying(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -138,12 +169,26 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
       {/* Header */}
       <div className="flex items-start justify-between p-4 border-b border-gray-100">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-mono text-sm font-bold text-indigo-700">
               {invoice.referenceNo}
             </span>
             <ChannelBadge channel={invoice.channel} />
             <StatusBadge status={invoice.status} />
+            {matchLabel && (
+              <a
+                href="/matcher/matching?filter=confirmed"
+                title="View in Matcher"
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  matchConfirmed
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}
+              >
+                <GitMerge className="w-3 h-3" />
+                {matchConfirmed ? matchLabel : `Pending: ${matchLabel}`}
+              </a>
+            )}
           </div>
           <p className="text-xs text-gray-400">
             {invoice.vendorName ?? invoice.fileName} ·{" "}
@@ -310,17 +355,37 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
               </div>
             </div>
 
-            {/* Line items */}
-            {invoice.lineItems.length > 0 && (
-              <div>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            {/* Line items — header + classify button always visible */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   Line Items
+                  {invoice.lineItems.length > 0 && (
+                    <span className="ml-1.5 font-normal normal-case text-gray-400">
+                      ({invoice.lineItems.length})
+                    </span>
+                  )}
                 </h4>
+                <button
+                  onClick={handleClassify}
+                  disabled={classifying}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                  title="Use AI to classify line items using the invoice concept as context"
+                >
+                  {classifying
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Sparkles className="w-3 h-3" />}
+                  {classifying ? "Classifying…" : "Classify with AI"}
+                </button>
+              </div>
+
+              {invoice.lineItems.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-gray-100">
                       <tr>
                         <th className="text-left p-2 text-gray-500 font-medium">Description</th>
+                        <th className="text-left p-2 text-gray-500 font-medium">Category</th>
                         <th className="text-right p-2 text-gray-500 font-medium">Qty</th>
                         <th className="text-right p-2 text-gray-500 font-medium">Unit Price</th>
                         <th className="text-right p-2 text-gray-500 font-medium">Total</th>
@@ -330,6 +395,11 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
                       {invoice.lineItems.map((li) => (
                         <tr key={li.id} className="bg-white">
                           <td className="p-2 text-gray-700">{li.description ?? "—"}</td>
+                          <td className="p-2">
+                            {li.category
+                              ? <CategoryBadge category={li.category} />
+                              : <span className="text-gray-300">—</span>}
+                          </td>
                           <td className="p-2 text-right text-gray-700">{li.quantity ?? "—"}</td>
                           <td className="p-2 text-right text-gray-700">
                             {li.unitPrice != null ? li.unitPrice.toFixed(2) : "—"}
@@ -342,8 +412,12 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
                     </tbody>
                   </table>
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-xs text-gray-400 italic">
+                  No line items extracted yet. Click &ldquo;Classify with AI&rdquo; to run AI classification.
+                </p>
+              )}
+            </div>
 
             {/* Event timeline */}
             <div>
@@ -378,6 +452,26 @@ function confidenceLabel(score: number | null): string {
   if (score >= 0.95) return "High";
   if (score >= 0.85) return "Medium";
   return "Low";
+}
+
+const CATEGORY_STYLES: Record<string, string> = {
+  material:  "bg-blue-50 text-blue-700 border-blue-200",
+  labor:     "bg-green-50 text-green-700 border-green-200",
+  equipment: "bg-orange-50 text-orange-700 border-orange-200",
+  freight:   "bg-purple-50 text-purple-700 border-purple-200",
+  overhead:  "bg-gray-100 text-gray-600 border-gray-200",
+  tax:       "bg-red-50 text-red-700 border-red-200",
+  discount:  "bg-teal-50 text-teal-700 border-teal-200",
+  other:     "bg-gray-50 text-gray-500 border-gray-200",
+};
+
+function CategoryBadge({ category }: { category: string }) {
+  const cls = CATEGORY_STYLES[category] ?? CATEGORY_STYLES.other;
+  return (
+    <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase tracking-wide ${cls}`}>
+      {category}
+    </span>
+  );
 }
 
 function confidenceColor(score: number | null): string {

@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Cpu, Webhook, FileType, Info,
   Copy, Check, Zap, FileText, Image,
-  Settings2, Save, Loader2,
+  Settings2, Save, Loader2, SlidersHorizontal,
 } from "lucide-react";
-import { COUNTRY_CURRENCY } from "@/lib/app-settings";
+import { COUNTRY_CURRENCY, ALL_EXTRACTION_FIELDS } from "@/lib/app-settings";
 import type { AppSettings } from "@/lib/app-settings";
 
 // ── Copy-to-clipboard helper ──────────────────────────────────────────────────
@@ -164,6 +164,77 @@ const COUNTRY_NAMES: Record<string, string> = {
   CN: "China", JP: "Japan", KR: "South Korea", IN: "India",
   AU: "Australia", NZ: "New Zealand",
 };
+
+// ── Field selection config ────────────────────────────────────────────────────
+
+type FieldGroup = {
+  label: string;
+  color: string;
+  fields: { key: string; label: string }[];
+};
+
+const FIELD_GROUPS: FieldGroup[] = [
+  {
+    label: "Core",
+    color: "bg-blue-50 text-blue-700 border-blue-100",
+    fields: [
+      { key: "vendor_name",    label: "Vendor Name" },
+      { key: "vendor_address", label: "Vendor Address" },
+      { key: "invoice_number", label: "Invoice Number" },
+      { key: "issue_date",     label: "Issue Date" },
+      { key: "due_date",       label: "Due Date" },
+      { key: "subtotal",       label: "Subtotal" },
+      { key: "tax",            label: "Tax (IVA/VAT)" },
+      { key: "total",          label: "Total Amount" },
+      { key: "currency",       label: "Currency" },
+    ],
+  },
+  {
+    label: "Financial",
+    color: "bg-emerald-50 text-emerald-700 border-emerald-100",
+    fields: [
+      { key: "po_reference",  label: "PO Reference" },
+      { key: "payment_terms", label: "Payment Terms" },
+      { key: "bank_details",  label: "Bank Details" },
+    ],
+  },
+  {
+    label: "Vendor",
+    color: "bg-purple-50 text-purple-700 border-purple-100",
+    fields: [
+      { key: "vendor_tax_id", label: "Vendor Tax ID (NIT/RFC/CUIT)" },
+    ],
+  },
+  {
+    label: "Buyer",
+    color: "bg-orange-50 text-orange-700 border-orange-100",
+    fields: [
+      { key: "buyer_name",    label: "Buyer Name" },
+      { key: "buyer_tax_id",  label: "Buyer Tax ID" },
+      { key: "buyer_address", label: "Buyer Address" },
+    ],
+  },
+  {
+    label: "Project",
+    color: "bg-teal-50 text-teal-700 border-teal-100",
+    fields: [
+      { key: "concept",         label: "Concept / Subject" },
+      { key: "project_name",    label: "Project Name" },
+      { key: "project_address", label: "Project Address" },
+      { key: "project_city",    label: "Project City" },
+    ],
+  },
+  {
+    label: "Other",
+    color: "bg-gray-50 text-gray-700 border-gray-100",
+    fields: [
+      { key: "notes",      label: "Notes / Observations" },
+      { key: "line_items", label: "Line Items" },
+    ],
+  },
+];
+
+const ALL_FIELD_KEYS = ALL_EXTRACTION_FIELDS as unknown as string[];
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
@@ -442,6 +513,103 @@ export default function SettingsPage() {
                     </span>
                   </label>
                 </FieldRow>
+              </>
+            )}
+          </Section>
+
+          {/* ── Fields to Extract ── */}
+          <Section
+            icon={<SlidersHorizontal className="w-4 h-4" />}
+            title="Fields to Extract"
+            description="Choose which fields the OCR extractor will capture from each invoice"
+          >
+            {loading || !draft ? (
+              <div className="flex items-center gap-2 text-xs text-gray-400 py-4">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading settings…
+              </div>
+            ) : (
+              <>
+                {/* Select all / deselect all */}
+                <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-50">
+                  <span className="text-xs text-gray-500">
+                    {(draft.extraction_fields ?? ALL_FIELD_KEYS).length} / {ALL_FIELD_KEYS.length} fields selected
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDraftField("extraction_fields", [...ALL_FIELD_KEYS])}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-gray-300">·</span>
+                    <button
+                      type="button"
+                      onClick={() => setDraftField("extraction_fields", [])}
+                      className="text-[11px] text-gray-400 hover:text-gray-600 font-medium"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                </div>
+
+                {/* Field groups */}
+                <div className="space-y-4">
+                  {FIELD_GROUPS.map((group) => {
+                    const activeFields = draft.extraction_fields ?? ALL_FIELD_KEYS;
+                    const allChecked = group.fields.every((f) => activeFields.includes(f.key));
+                    const someChecked = group.fields.some((f) => activeFields.includes(f.key));
+
+                    function toggleGroup(checked: boolean) {
+                      const keys = group.fields.map((f) => f.key);
+                      const next = checked
+                        ? Array.from(new Set([...activeFields, ...keys]))
+                        : activeFields.filter((k) => !keys.includes(k));
+                      setDraftField("extraction_fields", next);
+                    }
+
+                    function toggleField(key: string, checked: boolean) {
+                      const next = checked
+                        ? Array.from(new Set([...activeFields, key]))
+                        : activeFields.filter((k) => k !== key);
+                      setDraftField("extraction_fields", next);
+                    }
+
+                    return (
+                      <div key={group.label}>
+                        {/* Group header */}
+                        <label className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border cursor-pointer mb-1.5 ${group.color}`}>
+                          <input
+                            type="checkbox"
+                            checked={allChecked}
+                            ref={(el) => { if (el) el.indeterminate = !allChecked && someChecked; }}
+                            onChange={(e) => toggleGroup(e.target.checked)}
+                            className="w-3 h-3 accent-indigo-600"
+                          />
+                          {group.label}
+                        </label>
+                        {/* Fields */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 pl-2">
+                          {group.fields.map(({ key, label }) => (
+                            <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={activeFields.includes(key)}
+                                onChange={(e) => toggleField(key, e.target.checked)}
+                                className="w-3 h-3 accent-indigo-600 flex-shrink-0"
+                              />
+                              <span className="text-xs text-gray-700 truncate">{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[11px] text-gray-400 mt-3">
+                  Deselecting a field excludes it from the AI prompt, which can reduce cost and improve accuracy for fields that don&apos;t appear in your documents.
+                </p>
               </>
             )}
           </Section>

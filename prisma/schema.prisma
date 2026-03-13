@@ -11,14 +11,15 @@ datasource db {
 }
 
 model Vendor {
-  id        String    @id @default(uuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  invoices  Invoice[]
+  id             String          @id @default(uuid())
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  invoices       Invoice[]
+  purchaseOrders PurchaseOrder[]
 
   @@map("vendors")
 }
@@ -40,13 +41,29 @@ model Invoice {
   flags        String           @default("[]")  // JSON array of flag strings
   isDuplicate  Boolean          @default(false)
   duplicateOf  String?          // references another invoice id
+  ocrText      String?          // cleaned OCR text — stored for few-shot learning & fine-tuning
   vendorId     String?
   vendor       Vendor?          @relation(fields: [vendorId], references: [id])
-  extractedData ExtractedField[]
-  lineItems    LineItem[]
-  events       IngestionEvent[]
+  extractedData  ExtractedField[]
+  lineItems      LineItem[]
+  events         IngestionEvent[]
+  corrections    CorrectionLog[]
+  invoiceMatches InvoiceMatch[]
 
   @@map("invoices")
+}
+
+model CorrectionLog {
+  id             String   @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  fieldName      String
+  originalValue  String?  // what the AI extracted
+  correctedValue String?  // what the admin set it to
+  correctedBy    String?
+  correctedAt    DateTime @default(now())
+
+  @@map("correction_logs")
 }
 
 model ExtractedField {
@@ -70,6 +87,7 @@ model LineItem {
   quantity    Float?
   unitPrice   Float?
   lineTotal   Float?
+  category    String? // material | labor | equipment | freight | overhead | tax | discount | other
   confidence  Float?
 
   @@map("line_items")
@@ -93,4 +111,83 @@ model Setting {
   updatedAt DateTime @updatedAt
 
   @@map("settings")
+}
+
+// ── Project / PO Matching Module ─────────────────────────────────────────────
+
+model Project {
+  id             String          @id @default(uuid())
+  name           String
+  code           String?         @unique
+  address        String?
+  city           String?
+  budget         Float?
+  currency       String          @default("COP")
+  status         String          @default("active") // active | closed | on_hold
+  description    String?
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseOrders PurchaseOrder[]
+  invoiceMatches InvoiceMatch[]
+
+  @@map("projects")
+}
+
+model PurchaseOrder {
+  id             String         @id @default(uuid())
+  poNumber       String         @unique
+  projectId      String?
+  project        Project?       @relation(fields: [projectId], references: [id])
+  vendorId       String?
+  vendor         Vendor?        @relation(fields: [vendorId], references: [id])
+  vendorName     String?        // denormalized for fast display
+  description    String?
+  totalAmount    Float?
+  currency       String         @default("COP")
+  issueDate      DateTime?
+  expiryDate     DateTime?
+  status         String         @default("open") // open | partially_matched | fully_matched | closed
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  invoiceMatches InvoiceMatch[]
+
+  @@map("purchase_orders")
+}
+
+model CajaChica {
+  id             String         @id @default(uuid())
+  name           String
+  period         String?        // e.g. "Q1-2025"
+  balance        Float?
+  currency       String         @default("COP")
+  status         String         @default("open") // open | closed
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  invoiceMatches InvoiceMatch[]
+
+  @@map("caja_chica")
+}
+
+model InvoiceMatch {
+  id              String         @id @default(uuid())
+  invoiceId       String
+  invoice         Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  matchType       String         // "project" | "purchase_order" | "caja_chica"
+  projectId       String?
+  project         Project?       @relation(fields: [projectId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  cajaChicaId     String?
+  cajaChica       CajaChica?     @relation(fields: [cajaChicaId], references: [id])
+  confidence      Float?
+  reasoning       String?
+  matchedBy       String?        // "ai" | admin username
+  matchedAt       DateTime       @default(now())
+  isConfirmed     Boolean        @default(false)
+  confirmedBy     String?
+  confirmedAt     DateTime?
+
+  @@map("invoice_matches")
 }

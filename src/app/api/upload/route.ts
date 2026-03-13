@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
-import { extractInvoice, buildDuplicateKey } from "@/lib/claude";
+import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
+import { buildFewShotSection } from "@/lib/few-shot";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
@@ -170,12 +171,15 @@ async function processInvoice(
   const settings = await getSettings();
 
   try {
-    const extraction = await extractInvoice(buffer, mimeType, {
-      default_country:   settings.default_country,
-      default_currency:  settings.default_currency,
-      document_language: settings.document_language,
-      amount_format:     settings.amount_format,
-      timeout_ms:        settings.extraction_timeout_seconds * 1000,
+    const { result: extraction, ocrText } = await extractInvoiceWithOcr(buffer, mimeType, {
+      default_country:    settings.default_country,
+      default_currency:   settings.default_currency,
+      document_language:  settings.document_language,
+      amount_format:      settings.amount_format,
+      timeout_ms:         settings.extraction_timeout_seconds * 1000,
+      buildFewShot:       buildFewShotSection,
+      fineTunedModelId:   settings.finetune_model_id,
+      enabled_fields:     settings.extraction_fields,
     });
 
     // Upsert vendor
@@ -314,6 +318,7 @@ async function processInvoice(
           quantity: li.quantity,
           unitPrice: li.unit_price,
           lineTotal: li.line_total,
+          category: li.category ?? null,
           confidence: li.confidence,
         })),
       });
@@ -340,7 +345,7 @@ async function processInvoice(
     const finalStatus =
       approveThreshold !== null && allCoreHighConf ? "reviewed" : "extracted";
 
-    // Update invoice record
+    // Update invoice record (include ocrText for training data)
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: {
@@ -350,6 +355,7 @@ async function processInvoice(
         isDuplicate,
         duplicateOf,
         flags: JSON.stringify(flags),
+        ...(ocrText ? { ocrText: ocrText.slice(0, 8000) } : {}),
       },
     });
 

@@ -28,6 +28,7 @@ uploads/
 *.pem
 .vercel
 *.bak
+nul
 
 # Claude Code local settings
 .claude/

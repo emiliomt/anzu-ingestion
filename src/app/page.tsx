@@ -1,126 +1,111 @@
-import { UploadZone } from "@/components/UploadZone";
-import { StatusTracker } from "./StatusTracker";
-import { Globe, Mail, MessageCircle, Shield, Zap, Search } from "lucide-react";
+import Link from "next/link";
+import { LayoutDashboard, GitMerge, FileText, ArrowRight, Upload } from "lucide-react";
 
-export default function ProviderPortal() {
+export default function HubPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+    <div className="min-h-screen bg-gray-950 flex flex-col">
       {/* Header */}
-      <header className="border-b border-white/60 backdrop-blur bg-white/70 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-sm">AZ</span>
-            </div>
-            <span className="font-semibold text-gray-900 text-lg">AnzuIngestion</span>
+      <header className="flex items-center justify-between px-8 py-5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-indigo-500 rounded-xl flex items-center justify-center">
+            <span className="text-white font-bold text-sm">AZ</span>
           </div>
-          <div className="flex items-center gap-3">
-            <a href="/status/lookup" className="btn-secondary text-sm">
-              <Search className="w-4 h-4" />
-              Track Invoice
-            </a>
-            <a href="/admin" className="btn-primary text-sm">
-              Admin Dashboard →
-            </a>
-          </div>
+          <span className="font-semibold text-white text-lg tracking-tight">Anzu</span>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 pt-16 pb-12 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 rounded-full text-indigo-700 text-xs font-medium mb-6">
-          <Zap className="w-3.5 h-3.5" />
-          AI-powered invoice extraction
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4 leading-tight">
-          Submit your invoice,<br />
-          <span className="text-indigo-600">we handle the rest</span>
-        </h1>
-        <p className="text-lg text-gray-500 max-w-xl mx-auto mb-10">
-          Upload via web, email, or WhatsApp. Our AI extracts all the data automatically —
-          no manual entry, no delays.
-        </p>
-
-        {/* Channels */}
-        <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-12">
-          {[
-            { icon: <Globe className="w-5 h-5 text-sky-600" />, label: "Web Upload", bg: "bg-sky-50" },
-            { icon: <Mail className="w-5 h-5 text-orange-600" />, label: "Email", bg: "bg-orange-50" },
-            { icon: <MessageCircle className="w-5 h-5 text-green-600" />, label: "WhatsApp", bg: "bg-green-50" },
-          ].map((ch) => (
-            <div key={ch.label} className="flex flex-col items-center gap-2">
-              <div className={`w-12 h-12 rounded-xl ${ch.bg} flex items-center justify-center`}>
-                {ch.icon}
-              </div>
-              <span className="text-xs font-medium text-gray-600">{ch.label}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Upload card */}
-      <section className="max-w-2xl mx-auto px-4 pb-16">
-        <div className="card p-6 shadow-lg">
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Upload Invoice</h2>
-          <p className="text-sm text-gray-500 mb-5">
-            Drag and drop your invoice file or click to browse
+      {/* Main */}
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-20">
+        {/* Title */}
+        <div className="text-center mb-12">
+          <p className="text-xs font-semibold tracking-widest text-gray-500 uppercase mb-4">
+            Invoice Platform
           </p>
-          <UploadZone />
+          <h1 className="text-4xl sm:text-5xl font-bold text-white mb-3 leading-tight">
+            Where do you want to go?
+          </h1>
+          <p className="text-gray-400 text-lg">
+            Choose an app to get started.
+          </p>
         </div>
 
-        {/* Email & WhatsApp info */}
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="card p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Mail className="w-4 h-4 text-orange-500" />
-              <h3 className="text-sm font-semibold text-gray-800">Email Submission</h3>
+        {/* App cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 w-full max-w-2xl">
+          {/* Ingestor */}
+          <Link
+            href="/admin"
+            className="group flex flex-col p-7 rounded-2xl border border-white/10 bg-white/5 hover:bg-indigo-950/60 hover:border-indigo-500/40 transition-all duration-200"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center">
+                <LayoutDashboard className="w-6 h-6 text-white" />
+              </div>
+              <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
             </div>
-            <p className="text-xs text-gray-500">
-              Send your invoice as a PDF or image attachment to:
+            <h2 className="text-xl font-semibold text-white mb-2">Invoice Ingestor</h2>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Review, extract and manage invoices submitted via web, email, or WhatsApp.
             </p>
-            <code className="block mt-1 text-xs font-mono bg-gray-50 px-2 py-1 rounded border text-indigo-700">
-              invoices@yourdomain.com
-            </code>
-          </div>
-          <div className="card p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <MessageCircle className="w-4 h-4 text-green-500" />
-              <h3 className="text-sm font-semibold text-gray-800">WhatsApp Submission</h3>
+            <div className="mt-5 flex items-center gap-2">
+              <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-800">
+                Admin
+              </span>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-800">
+                AI Extraction
+              </span>
             </div>
-            <p className="text-xs text-gray-500">
-              Send your invoice image or PDF to our WhatsApp number:
+          </Link>
+
+          {/* Matcher */}
+          <Link
+            href="/matcher"
+            className="group flex flex-col p-7 rounded-2xl border border-white/10 bg-white/5 hover:bg-emerald-950/60 hover:border-emerald-500/40 transition-all duration-200"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center">
+                <GitMerge className="w-6 h-6 text-white" />
+              </div>
+              <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-emerald-400 group-hover:translate-x-1 transition-all" />
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-2">Invoice Matcher</h2>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Match processed invoices to Projects, Purchase Orders, or Caja Chica using AI.
             </p>
-            <code className="block mt-1 text-xs font-mono bg-gray-50 px-2 py-1 rounded border text-indigo-700">
-              +1 (415) 523-8886
-            </code>
-          </div>
+            <div className="mt-5 flex items-center gap-2">
+              <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-800">
+                Admin
+              </span>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-800">
+                AI Matching
+              </span>
+            </div>
+          </Link>
         </div>
 
-        {/* Status tracker */}
-        <div className="mt-4 card p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Search className="w-4 h-4 text-gray-400" />
-            <h3 className="text-sm font-semibold text-gray-800">Track your invoice</h3>
-          </div>
-          <StatusTracker />
+        {/* Vendor link */}
+        <div className="mt-10 flex items-center gap-6 text-sm text-gray-600">
+          <Link
+            href="/portal"
+            className="flex items-center gap-2 hover:text-gray-300 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Submit an invoice as a vendor
+          </Link>
+          <span>·</span>
+          <Link
+            href="/portal"
+            className="flex items-center gap-2 hover:text-gray-300 transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Track invoice status
+          </Link>
         </div>
+      </main>
 
-        {/* Trust signals */}
-        <div className="mt-6 flex items-center justify-center gap-6 text-xs text-gray-400">
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5" />
-            Encrypted storage
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5" />
-            &lt;2 min processing
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Search className="w-3.5 h-3.5" />
-            7-year retention
-          </div>
-        </div>
-      </section>
+      {/* Footer */}
+      <footer className="pb-6 text-center text-xs text-gray-700">
+        AnzuIngestion Platform
+      </footer>
     </div>
   );
 }

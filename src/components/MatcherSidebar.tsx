@@ -4,33 +4,32 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  LayoutDashboard, FileText, Settings,
-  Globe, Menu, X, BrainCircuit,
+  LayoutDashboard, FolderOpen, ShoppingCart,
+  Coins, Menu, X, Globe, GitMerge,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/admin",          label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/admin/invoices", label: "Invoices",  icon: FileText,        exact: false },
-  { href: "/admin/training", label: "Training",  icon: BrainCircuit,    exact: false },
-  { href: "/admin/settings", label: "Settings",  icon: Settings,        exact: false },
+  { href: "/matcher",                 label: "Dashboard",        icon: LayoutDashboard, exact: true },
+  { href: "/matcher/projects",        label: "Projects",         icon: FolderOpen,      exact: false },
+  { href: "/matcher/purchase-orders", label: "Purchase Orders",  icon: ShoppingCart,    exact: false },
+  { href: "/matcher/caja-chica",      label: "Caja Chica",       icon: Coins,           exact: false },
+  { href: "/matcher/matching",        label: "Match Invoices",   icon: GitMerge,        exact: false },
 ];
 
-export function AdminSidebar() {
+export function MatcherSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      {/* ── Mobile hamburger (fixed, only visible on small screens) ── */}
       <button
         aria-label="Open navigation"
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-[#1e1b4b] text-white rounded-lg shadow-lg"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-emerald-900 text-white rounded-lg shadow-lg"
         onClick={() => setOpen(true)}
       >
         <Menu className="w-5 h-5" />
       </button>
 
-      {/* ── Mobile overlay ────────────────────────────────────────── */}
       {open && (
         <div
           className="fixed inset-0 bg-black/40 z-40 lg:hidden"
@@ -38,24 +37,22 @@ export function AdminSidebar() {
         />
       )}
 
-      {/* ── Sidebar ───────────────────────────────────────────────── */}
       <aside
         className={`
           ${open ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0 transition-transform duration-200
           fixed lg:static inset-y-0 left-0 z-50
-          w-60 bg-[#1e1b4b] text-white flex flex-col flex-shrink-0
+          w-60 bg-emerald-950 text-white flex flex-col flex-shrink-0
         `}
       >
         {/* Logo row */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
               <span className="font-bold text-sm">AZ</span>
             </div>
-            <span className="font-semibold text-white">AnzuIngestion</span>
+            <span className="font-semibold text-white">Anzu Matcher</span>
           </div>
-          {/* Close button (mobile only) */}
           <button
             className="lg:hidden p-1.5 hover:bg-white/10 rounded-lg"
             onClick={() => setOpen(false)}
@@ -77,7 +74,7 @@ export function AdminSidebar() {
                   flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
                   ${active
                     ? "bg-white/15 text-white font-medium"
-                    : "text-indigo-200 hover:text-white hover:bg-white/10"
+                    : "text-emerald-200 hover:text-white hover:bg-white/10"
                   }
                 `}
               >
@@ -88,20 +85,22 @@ export function AdminSidebar() {
           })}
         </nav>
 
-        {/* Bottom actions */}
+        {/* Bottom links */}
         <div className="px-3 pb-4 space-y-2">
           <Link
-            href="/portal"
-            className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            href="/admin"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Ingestion App
+          </Link>
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <Globe className="w-4 h-4" />
-            Provider Portal
+            Home
           </Link>
-          <div className="px-3 py-2 text-xs text-indigo-300 border border-white/10 rounded-lg">
-            <div className="font-medium mb-0.5">Webhooks</div>
-            <div className="opacity-70">Email: /api/webhooks/email</div>
-            <div className="opacity-70">WA: /api/webhooks/whatsapp</div>
-          </div>
         </div>
       </aside>
     </>
