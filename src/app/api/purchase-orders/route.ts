@@ -38,7 +38,10 @@ export async function GET(request: NextRequest) {
       projectName: po.project?.name ?? null,
       vendorId: po.vendorId,
       vendorName: po.vendorName,
+      vendorTaxId: po.vendorTaxId,
       description: po.description,
+      source: po.source,
+      fileUrl: po.fileUrl,
       totalAmount: po.totalAmount,
       currency: po.currency,
       issueDate: po.issueDate?.toISOString() ?? null,
@@ -57,12 +60,16 @@ export async function POST(request: NextRequest) {
     projectId?: string;
     vendorId?: string;
     vendorName?: string;
+    vendorTaxId?: string;
     description?: string;
     totalAmount?: number;
     currency?: string;
     issueDate?: string;
     expiryDate?: string;
     status?: string;
+    source?: string;
+    fileUrl?: string;
+    ocrText?: string;
   };
 
   if (!body.poNumber?.trim()) {
@@ -75,7 +82,11 @@ export async function POST(request: NextRequest) {
       projectId: body.projectId || null,
       vendorId: body.vendorId || null,
       vendorName: body.vendorName?.trim() || null,
+      vendorTaxId: body.vendorTaxId?.trim() || null,
       description: body.description?.trim() || null,
+      source: body.source ?? "manual",
+      fileUrl: body.fileUrl ?? null,
+      ocrText: body.ocrText ?? null,
       totalAmount: body.totalAmount ?? null,
       currency: body.currency ?? "COP",
       issueDate: body.issueDate ? new Date(body.issueDate) : null,

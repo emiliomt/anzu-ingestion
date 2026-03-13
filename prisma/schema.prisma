@@ -145,12 +145,16 @@ model PurchaseOrder {
   vendorId       String?
   vendor         Vendor?        @relation(fields: [vendorId], references: [id])
   vendorName     String?        // denormalized for fast display
+  vendorTaxId    String?        // NIT / tax ID of vendor
   description    String?
   totalAmount    Float?
   currency       String         @default("COP")
   issueDate      DateTime?
   expiryDate     DateTime?
   status         String         @default("open") // open | partially_matched | fully_matched | closed
+  source         String         @default("manual") // manual | ocr | erp
+  fileUrl        String?        // stored PO document
+  ocrText        String?        // cleaned OCR text for audit
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   invoiceMatches InvoiceMatch[]
