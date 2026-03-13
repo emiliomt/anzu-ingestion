@@ -59,7 +59,20 @@ interface ExtractedPO {
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json(
+      { error: "ANTHROPIC_API_KEY is not configured on the server." },
+      { status: 500 }
+    );
+  }
+
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ error: "Failed to parse multipart form data" }, { status: 400 });
+  }
+
   const file = formData.get("file") as File | null;
 
   if (!file) {
@@ -110,12 +123,18 @@ export async function POST(request: NextRequest) {
     ];
   }
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content }],
-  });
+  let response;
+  try {
+    response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content }],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `AI extraction failed: ${msg}` }, { status: 502 });
+  }
 
   const raw = response.content[0].type === "text" ? response.content[0].text : "";
 

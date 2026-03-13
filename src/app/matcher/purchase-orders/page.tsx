@@ -173,8 +173,14 @@ export default function PurchaseOrdersPage() {
     fd.append("file", file);
     try {
       const res = await fetch("/api/purchase-orders/extract", { method: "POST", body: fd });
-      const json = await res.json() as { extracted?: ExtractedPO; fileUrl?: string; error?: string };
-      if (!res.ok || json.error) { setExtractErr(json.error ?? "Extraction failed"); return; }
+      let json: { extracted?: ExtractedPO; fileUrl?: string; error?: string };
+      try {
+        json = await res.json();
+      } catch {
+        setExtractErr(`Server error (${res.status}): Could not parse response. Check that ANTHROPIC_API_KEY is set.`);
+        return;
+      }
+      if (!res.ok || json.error) { setExtractErr(json.error ?? `Extraction failed (${res.status})`); return; }
       const e = json.extracted!;
       setExtracted(e);
       setExtractFileUrl(json.fileUrl ?? null);
@@ -189,6 +195,8 @@ export default function PurchaseOrdersPage() {
         description: [e.description, e.payment_terms].filter(Boolean).join(" | ") || "",
         status: "open",
       });
+    } catch (err) {
+      setExtractErr(err instanceof Error ? err.message : "Network error — could not reach extraction API");
     } finally { setExtracting(false); }
   }
 
@@ -418,7 +426,16 @@ export default function PurchaseOrdersPage() {
               {addMode === "ocr" && !editing && (
                 <div className="space-y-5">
                   {!extracted && (
-                    <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-10 cursor-pointer transition-colors ${extracting ? "border-indigo-300 bg-indigo-50" : "border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/50"}`}>
+                    <label
+                      className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-10 cursor-pointer transition-colors ${extracting ? "border-indigo-300 bg-indigo-50" : "border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/50"}`}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onDrop={async (e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        if (extracting) return;
+                        const f = e.dataTransfer.files?.[0];
+                        if (f) { setOcrFile(f); await runExtraction(f); }
+                      }}
+                    >
                       <FileSearch className="w-10 h-10 text-indigo-400 mb-3" />
                       <p className="font-medium text-gray-700">
                         {extracting ? "Extracting with AI…" : "Drop or click to upload a PO document"}
