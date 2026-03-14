@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       // Map extracted fields by name for quick lookup
       const fields: Record<string, string> = {};
       for (const f of m.invoice.extractedData) {
-        fields[f.fieldName] = f.fieldValue ?? "";
+        fields[f.fieldName] = f.value ?? "";
       }
 
       const matchType = m.matchType; // purchase_order | project | caja_chica

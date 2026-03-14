@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   const rows = matches.map((m) => {
     const fields: Record<string, string> = {};
     for (const f of m.invoice.extractedData) {
-      fields[f.fieldName] = f.fieldValue ?? "";
+      fields[f.fieldName] = f.value ?? "";
     }
     return {
       referenceNo:     m.invoice.referenceNo,
