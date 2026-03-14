@@ -191,6 +191,7 @@ model InvoiceMatch {
   reasoning       String?
   matchedBy       String?        // "ai" | admin username
   matchedAt       DateTime       @default(now())
+  approvalStatus  String         @default("pending") // pending | approved | rejected | assigned
   isConfirmed     Boolean        @default(false)
   confirmedBy     String?
   confirmedAt     DateTime?
