@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, FolderOpen, ShoppingCart,
-  Coins, Menu, X, Globe, GitMerge, Settings,
+  Coins, Menu, X, Globe, GitMerge, Settings, FileOutput,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/matcher/purchase-orders", label: "Purchase Orders",  icon: ShoppingCart,    exact: false },
   { href: "/matcher/caja-chica",      label: "Caja Chica",       icon: Coins,           exact: false },
   { href: "/matcher/matching",        label: "Match Invoices",   icon: GitMerge,        exact: false },
+  { href: "/matcher/matches",         label: "Matches",          icon: FileOutput,      exact: false },
   { href: "/matcher/settings",        label: "Settings",         icon: Settings,        exact: false },
 ];
 
