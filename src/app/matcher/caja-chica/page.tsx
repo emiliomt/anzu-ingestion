@@ -51,16 +51,19 @@ export default function CajaChicaPage() {
   const [recalculating, setRecalculating] = useState(false);
   const [recalcResult, setRecalcResult] = useState<{ created: number; removed: number } | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [currency, setCurrency] = useState<string>("COP");
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [thresholdRes, invoicesRes] = await Promise.all([
+    const [thresholdRes, invoicesRes, settingsRes] = await Promise.all([
       fetch("/api/caja-chica/threshold").then((r) => r.json() as Promise<{ threshold: number }>),
       fetch("/api/caja-chica/invoices").then((r) => r.json() as Promise<{ stats: PettyCashStats; invoices: PettyCashInvoice[] }>),
+      fetch("/api/settings").then((r) => r.json() as Promise<{ default_currency: string }>),
     ]);
     setThreshold(thresholdRes.threshold);
     setStats(invoicesRes.stats);
     setInvoices(invoicesRes.invoices);
+    setCurrency(settingsRes.default_currency ?? "COP");
     setLoading(false);
   }, []);
 
@@ -193,7 +196,7 @@ export default function CajaChicaPage() {
         <div className="flex items-center gap-4 py-3 border-t border-gray-100">
           <Settings className="w-4 h-4 text-gray-400 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium text-gray-900">Petty Cash Threshold (USD)</p>
+            <p className="text-sm font-medium text-gray-900">Petty Cash Threshold ({currency})</p>
             <p className="text-xs text-gray-500">Invoices below this amount will be classified as petty cash</p>
           </div>
           {editingThreshold ? (
@@ -224,7 +227,7 @@ export default function CajaChicaPage() {
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-gray-900">
-                ${threshold.toLocaleString()} USD
+                {threshold.toLocaleString()} {currency}
               </span>
               <button
                 onClick={() => { setThresholdInput(String(threshold)); setEditingThreshold(true); }}
