@@ -24,6 +24,7 @@ ENV NEXT_OUTPUT=standalone
 # All API routes use `export const dynamic = "force-dynamic"` so no real
 # DB queries are made during `next build` — this just satisfies the env check.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+RUN mkdir -p /app/public
 RUN npm run build
 # cache-bust: 2026-03-13
 
