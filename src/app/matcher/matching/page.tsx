@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
-import { Sparkles, Check, X, RefreshCw, Loader2, GitMerge, ChevronDown, ChevronLeft } from "lucide-react";
+import { Sparkles, Check, X, RefreshCw, Loader2, GitMerge, ChevronDown, ChevronLeft, Download } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 interface MatchRow {
@@ -137,15 +137,25 @@ function MatchingPageInner() {
             AI-powered matching of processed invoices to Projects, POs, or Caja Chica.
           </p>
         </div>
-        <button
-          onClick={runBatch}
-          disabled={batchRunning}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors"
-        >
-          {batchRunning
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Running AI…</>
-            : <><Sparkles className="w-4 h-4" /> Run AI Batch</>}
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/matching/export"
+            download
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Export to Excel
+          </a>
+          <button
+            onClick={runBatch}
+            disabled={batchRunning}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+          >
+            {batchRunning
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Running AI…</>
+              : <><Sparkles className="w-4 h-4" /> Run AI Batch</>}
+          </button>
+        </div>
       </div>
 
       {/* Filter tabs */}
