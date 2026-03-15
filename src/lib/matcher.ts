@@ -1,7 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _client;
+}
 
 export interface MatchResult {
   matchType: "project" | "purchase_order" | "caja_chica" | "unmatched";
@@ -65,7 +69,7 @@ export async function suggestMatch(invoiceId: string): Promise<MatchResult> {
     }
   }
 
-  // Build context for Claude
+  // Build context for GPT-4o-mini
   const invoiceContext = `
 INVOICE TO MATCH:
 - Reference: ${invoice.referenceNo}
@@ -130,19 +134,16 @@ Respond ONLY with a JSON object — no markdown, no explanation outside JSON:
   "reasoning": "<one sentence explaining the match>"
 }`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
+  const response = await getClient().chat.completions.create({
+    model: "gpt-4o-mini",
     max_tokens: 512,
+    temperature: 0,
+    response_format: { type: "json_object" },
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = (response.content[0] as { type: string; text: string }).text.trim();
+  const text = response.choices[0]?.message?.content?.trim() ?? "{}";
 
-  // Strip markdown fences if present
-  const jsonText = text.startsWith("```")
-    ? text.replace(/^```[a-z]*\n?/, "").replace(/\n?```$/, "")
-    : text;
-
-  const parsed = JSON.parse(jsonText) as MatchResult;
+  const parsed = JSON.parse(text) as MatchResult;
   return parsed;
 }
