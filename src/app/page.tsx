@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, GitMerge, FileText, ArrowRight, Upload } from "lucide-react";
+import { LayoutDashboard, GitMerge, FileText, ArrowRight, Upload, BookOpen } from "lucide-react";
 
 export default function HubPage() {
   return (
@@ -30,7 +30,7 @@ export default function HubPage() {
         </div>
 
         {/* App cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 w-full max-w-2xl">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 w-full max-w-4xl">
           {/* Ingestor */}
           <Link
             href="/admin"
@@ -77,6 +77,31 @@ export default function HubPage() {
               </span>
               <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-800">
                 AI Matching
+              </span>
+            </div>
+          </Link>
+
+          {/* Pre-Accounting */}
+          <Link
+            href="/preaccounting"
+            className="group flex flex-col p-7 rounded-2xl border border-white/10 bg-white/5 hover:bg-orange-950/60 hover:border-orange-500/40 transition-all duration-200"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="w-12 h-12 bg-orange-600 rounded-xl flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-white" />
+              </div>
+              <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-orange-400 group-hover:translate-x-1 transition-all" />
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-2">Pre-Accounting</h2>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Preliminary P&amp;L and expense classification for approved &amp; matched invoices.
+            </p>
+            <div className="mt-5 flex items-center gap-2">
+              <span className="px-2 py-0.5 text-xs rounded-full bg-orange-900/60 text-orange-300 border border-orange-800">
+                Finance
+              </span>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-orange-900/60 text-orange-300 border border-orange-800">
+                P&amp;L Report
               </span>
             </div>
           </Link>
