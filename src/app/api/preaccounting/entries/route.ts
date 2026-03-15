@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const invoiceWhere = {
     invoiceMatches: {
       some: {
-        approvalStatus: "approved",
+        isConfirmed: true,
         ...(projectId ? { projectId } : {}),
         ...(matchTypeFilter ? { matchType: matchTypeFilter } : {}),
       },
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
         invoice: {
           include: {
             invoiceMatches: {
-              where: { approvalStatus: "approved" },
+              where: { isConfirmed: true },
               include: {
                 project: { select: { id: true, name: true, code: true } },
                 purchaseOrder: { select: { id: true, poNumber: true } },

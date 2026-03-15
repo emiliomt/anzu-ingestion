@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   const matches = await prisma.invoiceMatch.findMany({
     where: {
-      approvalStatus: "approved",
+      isConfirmed: true,
       ...(projectId ? { projectId } : {}),
       ...(matchTypeFilter ? { matchType: matchTypeFilter } : {}),
       invoice: {
