@@ -1,11 +1,11 @@
 /**
  * POST /api/purchase-orders/extract
  *
- * Accepts a PO document (PDF or image) and uses Claude vision to extract
+ * Accepts a PO document (PDF or image) and uses GPT-4o vision to extract
  * structured fields for pre-filling the PO form.
  */
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { storeFile } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -58,10 +58,16 @@ interface ExtractedPO {
   }>;
 }
 
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _client;
+}
+
 export async function POST(request: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY is not configured on the server." },
+      { error: "OPENAI_API_KEY is not configured on the server." },
       { status: 500 }
     );
   }
@@ -92,55 +98,62 @@ export async function POST(request: NextRequest) {
   // Store the file
   const stored = await storeFile(buffer, file.name, mimeType, "po");
 
-  // Build Claude message
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  let content: Anthropic.MessageParam["content"];
+  // Build GPT-4o message — PDFs uploaded via Files API, images as base64
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userContent: any[] = [];
+  let uploadedFileId: string | null = null;
 
   if (mimeType === "application/pdf") {
-    content = [
-      {
-        type: "document",
-        source: {
-          type: "base64",
-          media_type: "application/pdf",
-          data: buffer.toString("base64"),
-        },
-      } as Anthropic.DocumentBlockParam,
-      { type: "text", text: "Extract all purchase order fields from this document." },
-    ];
-  } else {
-    content = [
-      {
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-          data: buffer.toString("base64"),
-        },
-      },
-      { type: "text", text: "Extract all purchase order fields from this document." },
-    ];
-  }
-
-  let response;
-  try {
-    response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content }],
+    const uploaded = await getClient().files.create({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      file: new File([new Uint8Array(buffer)], file.name, { type: "application/pdf" }) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      purpose: "user_data" as any,
     });
+    uploadedFileId = uploaded.id;
+    userContent.push({ type: "file", file: { file_id: uploadedFileId } });
+  } else {
+    const imageType = mimeType.includes("png")
+      ? "image/png"
+      : mimeType.includes("webp")
+      ? "image/webp"
+      : mimeType.includes("gif")
+      ? "image/gif"
+      : "image/jpeg";
+    userContent.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${imageType};base64,${buffer.toString("base64")}`,
+        detail: "high",
+      },
+    });
+  }
+  userContent.push({ type: "text", text: "Extract all purchase order fields from this document." });
+
+  let raw = "";
+  try {
+    const response = await getClient().chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 1024,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+    });
+    raw = response.choices[0]?.message?.content ?? "";
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `AI extraction failed: ${msg}` }, { status: 502 });
+  } finally {
+    if (uploadedFileId) {
+      getClient().files.delete(uploadedFileId).catch(() => {});
+    }
   }
-
-  const raw = response.content[0].type === "text" ? response.content[0].text : "";
 
   let extracted: ExtractedPO;
   try {
-    // Strip markdown fences if present
     const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     extracted = JSON.parse(cleaned) as ExtractedPO;
   } catch {
