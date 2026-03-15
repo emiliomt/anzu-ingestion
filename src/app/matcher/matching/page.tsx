@@ -88,7 +88,8 @@ function MatchingPageInner() {
       body: JSON.stringify({ invoiceId }),
     });
     setSuggestingId(null);
-    await load();
+    // Switch to "Awaiting Review" so the suggestion is visible for confirm/reject
+    setFilter("pending");
   }
 
   async function confirm(matchId: string) {

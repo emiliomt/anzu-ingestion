@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     ws["!cols"] = headers.map(() => ({ wch: 18 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ERP Export");
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as unknown as Uint8Array;
 
     const date = new Date().toISOString().slice(0, 10);
     const formData = new FormData();
