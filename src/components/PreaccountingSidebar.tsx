@@ -4,11 +4,12 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  LayoutDashboard, TableProperties, Menu, X, Globe, GitMerge,
+  LayoutDashboard, TableProperties, BarChart2, Menu, X, Globe, GitMerge,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/preaccounting",         label: "P&L Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/preaccounting/charts",  label: "Charts",        icon: BarChart2,       exact: false },
   { href: "/preaccounting/entries", label: "Entries",       icon: TableProperties, exact: false },
 ];
 
