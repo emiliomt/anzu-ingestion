@@ -308,7 +308,7 @@ export default function ChartsPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(v: number) => fmtFull(v)}
+                      formatter={(v) => fmtFull(Number(v))}
                       contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
                     />
                   </PieChart>
@@ -356,7 +356,7 @@ export default function ChartsPage() {
                   <XAxis type="number" tickFormatter={fmt} tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={140} />
                   <Tooltip
-                    formatter={(v: number) => fmtFull(v)}
+                    formatter={(v) => fmtFull(Number(v))}
                     contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
                   />
                   <Bar dataKey="Amount" fill="#6366f1" radius={[0, 4, 4, 0]} maxBarSize={32} />
@@ -379,7 +379,7 @@ export default function ChartsPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(v: number) => fmtFull(v)}
+                      formatter={(v) => fmtFull(Number(v))}
                       contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
                     />
                   </PieChart>
