@@ -9,7 +9,10 @@ export default function MatcherLayout({ children }: { children: React.ReactNode 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       <MatcherSidebar />
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      {/* Offset main for fixed sidebar: md=w-16, xl=w-60 */}
+      <main className="flex-1 overflow-y-auto md:ml-16 xl:ml-60 transition-all duration-300">
+        {children}
+      </main>
     </div>
   );
 }
