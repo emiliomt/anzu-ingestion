@@ -9,6 +9,7 @@ import { MetricsPanel } from "@/components/MetricsPanel";
 
 export default function AdminDashboard() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [tableRefreshKey, setTableRefreshKey] = useState(0);
 
   // Close detail panel on Escape
   useEffect(() => {
@@ -51,6 +52,8 @@ export default function AdminDashboard() {
           <InvoiceTable
             onSelectInvoice={(id) => setSelectedInvoiceId(id)}
             selectedId={selectedInvoiceId ?? undefined}
+            refreshKey={tableRefreshKey}
+            onBulkDeleted={() => setTableRefreshKey((k) => k + 1)}
           />
         </div>
 
@@ -60,6 +63,10 @@ export default function AdminDashboard() {
               invoiceId={selectedInvoiceId}
               onClose={() => setSelectedInvoiceId(null)}
               onStatusChange={() => {/* table auto-refreshes */}}
+              onDeleted={() => {
+                setSelectedInvoiceId(null);
+                setTableRefreshKey((k) => k + 1);
+              }}
             />
           </div>
         )}

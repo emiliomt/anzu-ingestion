@@ -70,6 +70,23 @@ export async function GET(
   });
 }
 
+/** Delete an invoice and all related data */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  const invoice = await prisma.invoice.findUnique({ where: { id }, select: { id: true } });
+  if (!invoice) {
+    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  }
+
+  await prisma.invoice.delete({ where: { id } });
+
+  return NextResponse.json({ success: true });
+}
+
 /** Update a field value (inline edit from admin dashboard) */
 export async function PATCH(
   request: NextRequest,

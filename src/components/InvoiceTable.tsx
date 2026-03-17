@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceListItem } from "@/types/invoice";
 import { format } from "date-fns";
@@ -9,6 +9,8 @@ import { format } from "date-fns";
 interface InvoiceTableProps {
   onSelectInvoice: (id: string) => void;
   selectedId?: string;
+  refreshKey?: number;
+  onBulkDeleted?: () => void;
 }
 
 interface PaginationData {
@@ -18,7 +20,7 @@ interface PaginationData {
   totalPages: number;
 }
 
-export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps) {
+export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDeleted }: InvoiceTableProps) {
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [pagination, setPagination] = useState<PaginationData>({
     page: 1, limit: 25, total: 0, totalPages: 0,
@@ -28,6 +30,9 @@ export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps)
   const [channelFilter, setChannelFilter] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const fetchInvoices = useCallback(async (page = 1) => {
     setLoading(true);
@@ -57,7 +62,48 @@ export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps)
     const interval = setInterval(() => fetchInvoices(pagination.page), 15000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, channelFilter, flaggedOnly]);
+  }, [search, statusFilter, channelFilter, flaggedOnly, refreshKey]);
+
+  // Clear selection when the list refreshes
+  useEffect(() => { setCheckedIds(new Set()); }, [refreshKey]);
+
+  const allChecked = invoices.length > 0 && invoices.every((inv) => checkedIds.has(inv.id));
+  const someChecked = invoices.some((inv) => checkedIds.has(inv.id));
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(invoices.map((inv) => inv.id)));
+    }
+  };
+
+  const toggleOne = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      await fetch("/api/invoices", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...checkedIds] }),
+      });
+      setCheckedIds(new Set());
+      setConfirmBulkDelete(false);
+      onBulkDeleted?.();
+      fetchInvoices(pagination.page);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const handleExport = () => {
     const params = new URLSearchParams({
@@ -133,6 +179,41 @@ export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps)
             {pagination.total} invoices
           </span>
         </div>
+
+        {/* Bulk delete bar */}
+        {someChecked && (
+          <div className="flex items-center gap-2 px-1 py-1 bg-red-50 border border-red-100 rounded-lg">
+            <span className="text-xs text-red-700 font-medium flex-1">
+              {checkedIds.size} selected
+            </span>
+            {!confirmBulkDelete ? (
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Delete selected
+              </button>
+            ) : (
+              <>
+                <span className="text-xs text-red-700 font-medium">Confirm delete {checkedIds.size} invoice{checkedIds.size > 1 ? "s" : ""}?</span>
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="text-xs px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {bulkDeleting ? "Deleting…" : "Yes, delete"}
+                </button>
+                <button
+                  onClick={() => setConfirmBulkDelete(false)}
+                  className="text-xs px-3 py-1 border border-red-200 text-red-600 rounded-md hover:bg-red-100 transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -163,6 +244,15 @@ export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps)
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-gray-50 border-b border-gray-100">
               <tr>
+                <th className="px-3 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                    onChange={toggleAll}
+                    className="rounded text-indigo-600 cursor-pointer"
+                  />
+                </th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wider">
                   Reference
                 </th>
@@ -193,8 +283,16 @@ export function InvoiceTable({ onSelectInvoice, selectedId }: InvoiceTableProps)
                   onClick={() => onSelectInvoice(inv.id)}
                   className={`cursor-pointer transition-colors hover:bg-gray-50 ${
                     selectedId === inv.id ? "bg-indigo-50" : ""
-                  }`}
+                  } ${checkedIds.has(inv.id) ? "bg-red-50 hover:bg-red-50" : ""}`}
                 >
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.has(inv.id)}
+                      onChange={() => toggleOne(inv.id)}
+                      className="rounded text-indigo-600 cursor-pointer"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs font-medium text-indigo-700">
                       {inv.referenceNo}

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import {
   X, ExternalLink, CheckCircle, Edit2, Save, AlertTriangle,
   FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge,
-  BookMarked,
+  BookMarked, Trash2,
 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceDetail as InvoiceDetailType, ExtractedFieldData } from "@/types/invoice";
@@ -15,6 +15,7 @@ interface InvoiceDetailProps {
   invoiceId: string;
   onClose: () => void;
   onStatusChange?: () => void;
+  onDeleted?: () => void;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -40,7 +41,7 @@ const FIELD_ICONS: Record<string, React.ReactNode> = {
   total: <DollarSign className="w-3.5 h-3.5" />,
 };
 
-export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDetailProps) {
+export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }: InvoiceDetailProps) {
   const [invoice, setInvoice] = useState<InvoiceDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -51,6 +52,8 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
   const [gtToast, setGtToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [matchLabel, setMatchLabel] = useState<string | null>(null);
   const [matchConfirmed, setMatchConfirmed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     // Load match status
@@ -187,6 +190,20 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
     }
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -239,9 +256,37 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
             {format(new Date(invoice.submittedAt), "MMM d, yyyy HH:mm")}
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-          <X className="w-5 h-5 text-gray-400" />
-        </button>
+        <div className="flex items-center gap-1">
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              title="Delete invoice"
+              className="p-1.5 hover:bg-red-50 rounded-lg transition-colors group"
+            >
+              <Trash2 className="w-4 h-4 text-gray-300 group-hover:text-red-500 transition-colors" />
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+              <span className="text-xs text-red-700 font-medium">Delete?</span>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="text-xs px-2 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? "…" : "Yes"}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs px-2 py-0.5 border border-red-200 text-red-600 rounded hover:bg-red-100 transition-colors"
+              >
+                No
+              </button>
+            </div>
+          )}
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
       </div>
 
       {/* Alerts */}

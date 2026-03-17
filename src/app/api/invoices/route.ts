@@ -100,3 +100,17 @@ export async function GET(request: NextRequest) {
     },
   });
 }
+
+/** Batch delete invoices by IDs */
+export async function DELETE(request: NextRequest) {
+  const body = await request.json() as { ids: string[] };
+  if (!Array.isArray(body.ids) || body.ids.length === 0) {
+    return NextResponse.json({ error: "ids array required" }, { status: 400 });
+  }
+
+  const { count } = await prisma.invoice.deleteMany({
+    where: { id: { in: body.ids } },
+  });
+
+  return NextResponse.json({ success: true, deleted: count });
+}
