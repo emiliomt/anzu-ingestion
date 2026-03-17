@@ -15,9 +15,11 @@
  */
 
 import OpenAI from "openai";
+import { z } from "zod";
 import { bufferToBase64 } from "./utils";
 import { cleanOcrText } from "./ocr-cleaner";
 import { parseInvoiceXML } from "./xml-parser";
+import { EXTRACTION_SYSTEM_PROMPT } from "./extraction-prompt";
 
 // ── Extraction options (injected from app settings) ───────────────────────────
 export interface ExtractionOptions {
@@ -61,6 +63,57 @@ function getClient(): OpenAI {
 
 const OCR_MODEL       = "gpt-4o";       // vision — needed for image/PDF OCR
 const EXTRACT_MODEL   = "gpt-4o-mini";  // text-only — cheap structured extraction
+
+// ── Zod schemas ───────────────────────────────────────────────────────────────
+
+const ExtractionFieldSchema = z.object({
+  value: z.union([z.string(), z.number()]).nullable(),
+  confidence: z.number().min(0).max(1),
+  is_uncertain: z.boolean().optional(),
+});
+
+const LineItemCategorySchema = z.enum([
+  "material", "labor", "equipment", "freight",
+  "overhead", "tax", "discount", "other",
+]).nullable();
+
+const LineItemSchema = z.object({
+  description: z.string().nullable(),
+  quantity:    z.number().nullable(),
+  unit_price:  z.number().nullable(),
+  line_total:  z.number().nullable(),
+  category:    LineItemCategorySchema,
+  confidence:  z.number().min(0).max(1),
+});
+
+const InvoiceExtractionSchema = z.object({
+  vendor_name:          ExtractionFieldSchema,
+  vendor_address:       ExtractionFieldSchema,
+  invoice_number:       ExtractionFieldSchema,
+  issue_date:           ExtractionFieldSchema,
+  due_date:             ExtractionFieldSchema,
+  subtotal:             ExtractionFieldSchema,
+  tax:                  ExtractionFieldSchema,
+  total:                ExtractionFieldSchema,
+  currency:             ExtractionFieldSchema,
+  po_reference:         ExtractionFieldSchema,
+  payment_terms:        ExtractionFieldSchema,
+  bank_details:         ExtractionFieldSchema,
+  line_items:           z.array(LineItemSchema),
+  // Extended fields (optional — XML parser and enhanced extraction)
+  vendor_tax_id:        ExtractionFieldSchema.optional(),
+  buyer_name:           ExtractionFieldSchema.optional(),
+  buyer_tax_id:         ExtractionFieldSchema.optional(),
+  buyer_address:        ExtractionFieldSchema.optional(),
+  concept:              ExtractionFieldSchema.optional(),
+  project_name:         ExtractionFieldSchema.optional(),
+  project_address:      ExtractionFieldSchema.optional(),
+  project_city:         ExtractionFieldSchema.optional(),
+  description_summary:  ExtractionFieldSchema.optional(),
+  notes:                ExtractionFieldSchema.optional(),
+});
+
+export type InvoiceExtractionInput = z.input<typeof InvoiceExtractionSchema>;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -120,115 +173,9 @@ export interface InvoiceExtraction {
 
 // ── System prompt (shared by both the OCR‑extracted path and direct path) ─────
 //
-// Lives in the system role so GPT-4o-mini treats it as standing instructions
-// rather than part of the document being analysed.
-const EXTRACTION_SYSTEM_PROMPT = `You are an expert invoice OCR and structured data extraction system. You have deep knowledge of invoice formats from Latin America (Colombia, Mexico, Argentina, Chile, Peru, Uruguay), USA, Canada, Europe, and worldwide.
-
-══ CURRENCY DETECTION ══════════════════════════════════════════════════════════
-Currency must NEVER be null when monetary amounts exist in the document.
-Work through these signals in order:
-
-1. EXPLICIT ISO CODE — if the document says "USD", "EUR", "COP", "MXN", "ARS",
-   "CLP", "BRL", "PEN", "GBP", etc., use it directly. Confidence 1.0.
-
-2. CURRENCY WORDS
-   "dólares americanos"   → USD
-   "pesos colombianos"    → COP
-   "pesos mexicanos"      → MXN
-   "pesos argentinos"     → ARS
-   "pesos chilenos"       → CLP
-   "euros"                → EUR  |  "libras"  → GBP
-   "reales"               → BRL  |  "soles"   → PEN
-   Confidence 0.95.
-
-3. TAX ID FORMAT → COUNTRY → CURRENCY  (very reliable)
-   NIT  "900.xxx.xxx-x"   → Colombia → COP
-   RFC  "XXXX999999XXX"   → Mexico   → MXN
-   CUIT "XX-XXXXXXXX-X"   → Argentina → ARS
-   RUT  "XX.XXX.XXX-X"    → Chile    → CLP
-   RUC                    → Peru → PEN  or  Ecuador → USD
-   CNPJ / CPF             → Brazil   → BRL
-   EIN / FEIN             → USA      → USD
-   VAT "GB…"              → UK       → GBP
-   VAT "DE/FR/ES/IT…"     → EU member → EUR
-   Confidence 0.90.
-
-4. SYMBOL + ADDRESS CONTEXT
-   "$" + Colombian city (Bogotá, Medellín, Cali, Barranquilla…) → COP
-   "$" + Mexican city (CDMX, Monterrey, Guadalajara…)           → MXN
-   "$" + Argentine city (Buenos Aires, Córdoba, Rosario…)        → ARS
-   "$" + Chilean city (Santiago, Valparaíso…)                    → CLP
-   "$" + US / CA city or state                                   → USD
-   "€" → EUR  |  "£" → GBP
-   Confidence 0.80.
-
-5. AMOUNT MAGNITUDE (last resort)
-   Amounts > 100,000 with "$" and no US/CA address → likely Latin American peso
-   (COP most common). Confidence 0.65, set is_uncertain: true.
-
-══ NUMBER FORMAT RULES ══════════════════════════════════════════════════════════
-Latin American and European invoices use DIFFERENT separators than the US:
-  "1.200.000"       → 1200000      (period = thousands)
-  "1.200.000,00"    → 1200000.00   (period = thousands, comma = decimal)
-  "1.250,50"        → 1250.50      (European: comma = decimal)
-  "1,250.50"        → 1250.50      (US: comma = thousands)
-Always return amounts as plain JS numbers. No commas, no symbols, no strings.
-
-══ CONFIDENCE SCORING ═══════════════════════════════════════════════════════════
-1.00  Field explicitly and clearly present, no ambiguity
-0.95  Clearly present, very minor OCR uncertainty
-0.85  Present but required minor inference          → is_uncertain: false
-0.75  Inferred from strong contextual signals       → is_uncertain: false
-0.65  Inferred from weak/indirect signals           → is_uncertain: true
-<0.65 Highly uncertain or speculative               → is_uncertain: true
-
-══ FIELD-SPECIFIC RULES ═════════════════════════════════════════════════════════
-vendor_name:     Company/person ISSUING the invoice (not the buyer).
-vendor_address:  Full address of the vendor including city and country if present.
-vendor_tax_id:   NIT / RFC / CUIT / RUC of the VENDOR (issuing party).
-invoice_number:  "Factura No.", "Invoice #", "No. Factura", "Nro.", "Número".
-                 CUFE, CUDE, UUID (long hex strings) are NOT invoice numbers.
-issue_date:      Date the invoice was created. ISO format YYYY-MM-DD.
-due_date:        Payment deadline. Return null if not explicitly stated.
-subtotal:        Amount before tax. Return null if only the total is shown.
-tax:             IVA / VAT / GST / impuesto amount as a number.
-total:           Grand total. "TOTAL", "Total a Pagar", "Total Factura".
-po_reference:    "O.C.", "Orden de Compra", "P.O.", "PO#".
-payment_terms:   e.g. "Net 30", "Contado", "30 días", "Pago inmediato".
-bank_details:    Concatenate bank name, account number, routing, IBAN into one string.
-buyer_name:      Name of the BUYER / Adquiriente / Cliente (not the vendor).
-buyer_tax_id:    NIT / RFC / CUIT of the buyer.
-buyer_address:   Full address of the buyer.
-concept:         Brief summary of what the invoice is for (first line of services).
-project_name:    Obra / proyecto / project name if mentioned.
-project_address: Physical address of the project / obra.
-project_city:    City where the project is located.
-notes:           Observations, payment notes, or footer text.
-
-══ LINE ITEM CLASSIFICATION ════════════════════════════════════════════════
-Classify every line item into exactly one of the following categories:
-
-  material   — raw materials, supplies, parts, products, goods, hardware,
-               components, consumables (e.g. "concrete", "steel pipe", "lumber")
-  labor      — professional services, installation, workforce, personnel,
-               man-hours, operator fees (e.g. "mano de obra", "installation labor")
-  equipment  — machinery, tools, vehicles, rental equipment, scaffolding
-               (e.g. "excavator rental", "alquiler grúa", "equipment lease")
-  freight    — shipping, transport, delivery, logistics, import costs
-               (e.g. "flete", "shipping & handling", "delivery charge")
-  overhead   — management fees, administrative costs, overhead surcharges,
-               mobilization, insurance (e.g. "administración", "overhead 10%")
-  tax        — taxes, duties, levies, IVA, VAT, retención, withholding
-               (e.g. "IVA 19%", "retención fuente", "GST")
-  discount   — discounts, credits, rebates (usually negative amounts)
-               (e.g. "descuento 5%", "credit note", "rebate")
-  other      — anything not clearly matching the categories above
-
-Rules:
-- Base the classification on the description text only.
-- Set category: null ONLY when description is completely blank.
-- When the description is ambiguous, choose the most likely category and
-  lower the confidence score for that line item.`;
+// Imported from src/lib/extraction-prompt.ts so it is also available to the
+// fine-tuning export route without pulling in the OpenAI client.
+export { EXTRACTION_SYSTEM_PROMPT } from "./extraction-prompt";
 
 // ── Per-field JSON schema templates ──────────────────────────────────────────
 const FIELD_TEMPLATES: Record<string, string> = {
@@ -412,13 +359,27 @@ async function handleImageOrPdf(
   const raw = extractResp.choices[0]?.message?.content ?? "";
   const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
-  let parsed: InvoiceExtraction;
+  let rawParsed: unknown;
   try {
-    parsed = JSON.parse(cleaned) as InvoiceExtraction;
+    rawParsed = JSON.parse(cleaned);
   } catch {
     throw new Error(
       `GPT-4o-mini returned invalid JSON. Raw response: ${raw.slice(0, 500)}`
     );
+  }
+
+  const validation = InvoiceExtractionSchema.safeParse(rawParsed);
+  let parsed: InvoiceExtraction;
+  if (validation.success) {
+    parsed = validation.data as InvoiceExtraction;
+  } else {
+    // Log schema mismatches but don't hard-fail — use the raw data so partial
+    // results still reach the caller instead of crashing the upload pipeline.
+    console.warn(
+      "[extraction] Zod validation warnings:",
+      validation.error.flatten().fieldErrors
+    );
+    parsed = rawParsed as InvoiceExtraction;
   }
 
   if (!Array.isArray(parsed.line_items)) parsed.line_items = [];

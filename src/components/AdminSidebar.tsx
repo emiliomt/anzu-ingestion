@@ -5,14 +5,16 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, FileText, Settings,
-  Globe, Menu, X, BrainCircuit,
+  Globe, Menu, X, BrainCircuit, GitMerge, BookOpen, Sparkles,
 } from "lucide-react";
+import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
 const NAV_ITEMS = [
-  { href: "/admin",          label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/admin/invoices", label: "Invoices",  icon: FileText,        exact: false },
-  { href: "/admin/training", label: "Training",  icon: BrainCircuit,    exact: false },
-  { href: "/admin/settings", label: "Settings",  icon: Settings,        exact: false },
+  { href: "/admin",           label: "Dashboard",  icon: LayoutDashboard, exact: true },
+  { href: "/admin/invoices",  label: "Invoices",   icon: FileText,        exact: false },
+  { href: "/admin/training",  label: "Training",   icon: BrainCircuit,    exact: false },
+  { href: "/admin/fine-tune", label: "Fine-Tune",  icon: Sparkles,        exact: false },
+  { href: "/admin/settings",  label: "Settings",   icon: Settings,        exact: false },
 ];
 
 export function AdminSidebar() {
@@ -49,12 +51,10 @@ export function AdminSidebar() {
       >
         {/* Logo row */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="font-bold text-sm">AZ</span>
-            </div>
-            <span className="font-semibold text-white">AnzuIngestion</span>
-          </div>
+          <Link href="/" className="flex items-center gap-3">
+            <AnzuLogo variant="icon" size={32} />
+            <span className="font-semibold text-white">Invoice Ingestor</span>
+          </Link>
           {/* Close button (mobile only) */}
           <button
             className="lg:hidden p-1.5 hover:bg-white/10 rounded-lg"
@@ -89,7 +89,22 @@ export function AdminSidebar() {
         </nav>
 
         {/* Bottom actions */}
-        <div className="px-3 pb-4 space-y-2">
+        <div className="px-3 pb-4 border-t border-white/10 pt-3 space-y-1">
+          <p className="px-3 py-1 text-xs font-semibold text-indigo-400 uppercase tracking-wider">Other Apps</p>
+          <Link
+            href="/matcher"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <GitMerge className="w-4 h-4" />
+            Invoice Matcher
+          </Link>
+          <Link
+            href="/preaccounting"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <BookOpen className="w-4 h-4" />
+            Pre-Accounting
+          </Link>
           <Link
             href="/portal"
             className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -97,11 +112,13 @@ export function AdminSidebar() {
             <Globe className="w-4 h-4" />
             Provider Portal
           </Link>
-          <div className="px-3 py-2 text-xs text-indigo-300 border border-white/10 rounded-lg">
-            <div className="font-medium mb-0.5">Webhooks</div>
-            <div className="opacity-70">Email: /api/webhooks/email</div>
-            <div className="opacity-70">WA: /api/webhooks/whatsapp</div>
-          </div>
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <Globe className="w-4 h-4" />
+            Landing Page
+          </Link>
         </div>
       </aside>
     </>

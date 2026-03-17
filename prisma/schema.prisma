@@ -42,6 +42,16 @@ model Invoice {
   isDuplicate  Boolean          @default(false)
   duplicateOf  String?          // references another invoice id
   ocrText      String?          // cleaned OCR text — stored for few-shot learning & fine-tuning
+  updatedAt    DateTime         @updatedAt
+
+  // ── Human Corrections & Fine-Tuning ─────────────────────────────────────────
+  // correctedData stored as JSON string for SQLite compat; swap to Json? on PostgreSQL-only
+  correctedData    String?      // serialised JSON of the corrected extraction payload
+  fineTuneStatus   String       @default("PENDING") // PENDING | READY | UPLOADED | ERROR
+  fineTuneJobId    String?      // fine-tune job id once submitted to AI provider
+  correctedBy      String?      // user email or id who made the correction
+  correctionNotes  String?      // free-text rationale for the correction
+
   vendorId     String?
   vendor       Vendor?          @relation(fields: [vendorId], references: [id])
   extractedData  ExtractedField[]
