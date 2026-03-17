@@ -92,7 +92,7 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
       await fetch("/api/invoices", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [...checkedIds] }),
+        body: JSON.stringify({ ids: Array.from(checkedIds) }),
       });
       setCheckedIds(new Set());
       setConfirmBulkDelete(false);
