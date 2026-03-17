@@ -5,8 +5,9 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, FolderOpen, ShoppingCart,
-  Coins, Menu, X, Globe, GitMerge, Settings, FileOutput,
+  Coins, Menu, X, Globe, GitMerge, Settings, FileOutput, BookOpen, FileText,
 } from "lucide-react";
+import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
 const NAV_ITEMS = [
   { href: "/matcher",                 label: "Dashboard",        icon: LayoutDashboard, exact: true },
@@ -49,12 +50,10 @@ export function MatcherSidebar() {
       >
         {/* Logo row */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="font-bold text-sm">AZ</span>
-            </div>
-            <span className="font-semibold text-white">Anzu Matcher</span>
-          </div>
+          <Link href="/" className="flex items-center gap-3">
+            <AnzuLogo variant="icon" size={32} />
+            <span className="font-semibold text-white">Invoice Matcher</span>
+          </Link>
           <button
             className="lg:hidden p-1.5 hover:bg-white/10 rounded-lg"
             onClick={() => setOpen(false)}
@@ -87,21 +86,29 @@ export function MatcherSidebar() {
           })}
         </nav>
 
-        {/* Bottom links */}
-        <div className="px-3 pb-4 space-y-2">
+        {/* Bottom links — cross-app navigation */}
+        <div className="px-3 pb-4 border-t border-white/10 pt-3 space-y-1">
+          <p className="px-3 py-1 text-xs font-semibold text-emerald-400 uppercase tracking-wider">Other Apps</p>
           <Link
             href="/admin"
             className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
-            <LayoutDashboard className="w-4 h-4" />
-            Ingestion App
+            <FileText className="w-4 h-4" />
+            Invoice Ingestor
+          </Link>
+          <Link
+            href="/preaccounting"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <BookOpen className="w-4 h-4" />
+            Pre-Accounting
           </Link>
           <Link
             href="/"
             className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <Globe className="w-4 h-4" />
-            Home
+            Landing Page
           </Link>
         </div>
       </aside>

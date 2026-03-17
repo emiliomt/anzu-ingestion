@@ -2,6 +2,129 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   ANZU DESIGN SYSTEM — Typography tokens, brand colors, animations
+   Fonts: Jost (display) · Instrument Serif (body) · JetBrains Mono (mono)
+   Loaded via <link> in layout.tsx
+───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Typography */
+  --font-display: "Jost", system-ui, sans-serif;
+  --font-body:    "Instrument Serif", Georgia, serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", monospace;
+
+  /* Headline sizes — mobile first */
+  --h1-size:  2rem;
+  --h2-size:  1.5rem;
+  --h3-size:  1.125rem;
+
+  /* Section vertical padding */
+  --section-py: 48px;
+
+  /* Easing */
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit:     cubic-bezier(0.3, 0, 0.84, 0);
+
+  /* Brand colors */
+  --anzu-navy:        #0C1B3A;
+  --anzu-orange:      #F97316;
+  --anzu-orange-dark: #EA580C;
+  --anzu-blue:        #2563EB;
+  --anzu-emerald:     #10B981;
+  --anzu-amber:       #F59E0B;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --h1-size:    2.5rem;
+    --h2-size:    1.75rem;
+    --h3-size:    1.25rem;
+    --section-py: 64px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --h1-size:    4rem;
+    --h2-size:    2.25rem;
+    --h3-size:    1.5rem;
+    --section-py: 96px;
+  }
+}
+
+/* ── Keyframes ── */
+@keyframes anzu-fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anzu-drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes anzu-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+
+@keyframes phoenix-rise {
+  0%   { opacity: 0; transform: scale(0.94); filter: drop-shadow(0 0 0px rgba(249,115,22,0)); }
+  60%  { opacity: 1; transform: scale(1.02); filter: drop-shadow(0 0 10px rgba(249,115,22,0.45)); }
+  100% { opacity: 1; transform: scale(1);    filter: drop-shadow(0 0 4px rgba(249,115,22,0.20)); }
+}
+
+/* ── Animation utilities ── */
+.anzu-fade-up {
+  animation: anzu-fade-up 600ms var(--ease-entrance) both;
+  will-change: transform, opacity;
+}
+
+.animate-float       { animation: float 3s ease-in-out infinite; }
+.animate-float-delay { animation: float 3s ease-in-out 1s infinite; }
+.animate-pulse-soft  { animation: pulse-soft 2s ease-in-out infinite; }
+
+.anzu-drawer-open {
+  animation: anzu-drawer-in 300ms var(--ease-entrance) both;
+}
+.anzu-drawer-backdrop {
+  animation: anzu-backdrop-in 250ms ease-out both;
+}
+
+/* ── Section spacing ── */
+.anzu-section {
+  padding-top: var(--section-py);
+  padding-bottom: var(--section-py);
+}
+
+/* ── CTA button ── */
+.anzu-btn-cta {
+  will-change: filter, transform;
+  transition: filter 150ms ease-out, transform 150ms ease-out !important;
+}
+.anzu-btn-cta:hover  { filter: brightness(0.92); }
+.anzu-btn-cta:active { filter: brightness(0.86); transform: scale(0.98); }
+
+/* ── Card hover ── */
+.anzu-card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.anzu-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(249, 115, 22, 0.10);
+}
+
 @layer base {
   :root {
     --color-brand: 79 70 229;

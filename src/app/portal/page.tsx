@@ -2,6 +2,7 @@ import { UploadZone } from "@/components/UploadZone";
 import { StatusTracker } from "@/app/StatusTracker";
 import { Globe, Mail, MessageCircle, Shield, Zap, Search } from "lucide-react";
 import Link from "next/link";
+import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
 export default function ProviderPortal() {
   return (
@@ -9,19 +10,17 @@ export default function ProviderPortal() {
       {/* Header */}
       <header className="border-b border-white/60 backdrop-blur bg-white/70 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-sm">AZ</span>
-            </div>
-            <span className="font-semibold text-gray-900 text-lg">AnzuIngestion</span>
-          </div>
+          <Link href="/" className="flex items-center gap-3">
+            <AnzuLogo variant="icon" size={36} />
+            <span className="font-semibold text-gray-900 text-lg">Anzu</span>
+          </Link>
           <div className="flex items-center gap-3">
             <Link href="/status/lookup" className="btn-secondary text-sm">
               <Search className="w-4 h-4" />
               Track Invoice
             </Link>
             <Link href="/" className="text-sm text-gray-500 hover:text-gray-700 transition-colors">
-              ← Back
+              ← Landing Page
             </Link>
           </div>
         </div>

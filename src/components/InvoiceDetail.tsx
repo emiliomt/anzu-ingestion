@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import {
   X, ExternalLink, CheckCircle, Edit2, Save, AlertTriangle,
-  FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge
+  FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge,
+  BookMarked,
 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceDetail as InvoiceDetailType, ExtractedFieldData } from "@/types/invoice";
+import { saveGroundTruth } from "@/app/admin/invoices/[id]/actions";
 import { format } from "date-fns";
 
 interface InvoiceDetailProps {
@@ -45,6 +47,8 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [savingGT, setSavingGT] = useState(false);
+  const [gtToast, setGtToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [matchLabel, setMatchLabel] = useState<string | null>(null);
   const [matchConfirmed, setMatchConfirmed] = useState(false);
 
@@ -129,6 +133,46 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
     }
   };
 
+  const handleSaveGroundTruth = async () => {
+    setSavingGT(true);
+    setGtToast(null);
+    try {
+      const result = await saveGroundTruth(invoiceId);
+      if (result.success) {
+        setGtToast({
+          type: "success",
+          text: `Ground truth saved (${result.fieldCount} fields) — fineTuneStatus: READY`,
+        });
+        // Reflect the new fineTuneStatus in the audit trail without a full reload
+        setInvoice((prev) =>
+          prev
+            ? {
+                ...prev,
+                events: [
+                  {
+                    id: crypto.randomUUID(),
+                    eventType: "ground_truth_saved",
+                    timestamp: new Date().toISOString(),
+                    metadata: { fieldCount: result.fieldCount, by: "admin" },
+                  },
+                  ...prev.events,
+                ],
+              }
+            : prev
+        );
+      } else {
+        setGtToast({ type: "error", text: result.error ?? "Unknown error" });
+      }
+    } catch (err) {
+      console.error("[saveGroundTruth]", err);
+      setGtToast({ type: "error", text: "Request failed" });
+    } finally {
+      setSavingGT(false);
+      // Auto-dismiss after 4 s
+      setTimeout(() => setGtToast(null), 4000);
+    }
+  };
+
   const handleClassify = async () => {
     setClassifying(true);
     try {
@@ -165,7 +209,7 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
   );
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="relative flex flex-col h-full bg-white">
       {/* Header */}
       <div className="flex items-start justify-between p-4 border-b border-gray-100">
         <div>
@@ -269,6 +313,20 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
                   {s.charAt(0).toUpperCase() + s.slice(1)}
                 </button>
               ))}
+
+              {/* ── Ground-truth capture ── */}
+              <div className="h-4 w-px bg-gray-200 mx-1" aria-hidden />
+              <button
+                onClick={handleSaveGroundTruth}
+                disabled={savingGT}
+                title="Snapshot current field values as verified ground truth for AI fine-tuning (sets fineTuneStatus = READY)"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+              >
+                {savingGT
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <BookMarked className="w-3 h-3" />}
+                {savingGT ? "Saving…" : "Save Ground Truth"}
+              </button>
             </div>
 
             {/* Extracted fields */}
@@ -443,6 +501,21 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange }: InvoiceDet
           </div>
         </div>
       </div>
+      {/* Ground-truth toast */}
+      {gtToast && (
+        <div
+          className={`absolute bottom-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg text-xs font-medium border ${
+            gtToast.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-red-50 border-red-200 text-red-800"
+          }`}
+        >
+          {gtToast.type === "success"
+            ? <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+            : <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
+          {gtToast.text}
+        </div>
+      )}
     </div>
   );
 }

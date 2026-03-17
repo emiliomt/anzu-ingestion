@@ -4,8 +4,9 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  LayoutDashboard, TableProperties, BarChart2, Menu, X, Globe, GitMerge,
+  LayoutDashboard, TableProperties, BarChart2, Menu, X, Globe, GitMerge, FileText,
 } from "lucide-react";
+import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
 const NAV_ITEMS = [
   { href: "/preaccounting",         label: "P&L Dashboard", icon: LayoutDashboard, exact: true },
@@ -44,12 +45,10 @@ export function PreaccountingSidebar() {
       >
         {/* Logo row */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="font-bold text-sm">AZ</span>
-            </div>
+          <Link href="/" className="flex items-center gap-3">
+            <AnzuLogo variant="icon" size={32} />
             <span className="font-semibold text-white">Anzu Accounts</span>
-          </div>
+          </Link>
           <button
             className="lg:hidden p-1.5 hover:bg-white/10 rounded-lg"
             onClick={() => setOpen(false)}
@@ -82,21 +81,29 @@ export function PreaccountingSidebar() {
           })}
         </nav>
 
-        {/* Bottom links */}
-        <div className="px-3 pb-4 space-y-2">
+        {/* Bottom links — cross-app navigation */}
+        <div className="px-3 pb-4 border-t border-white/10 pt-3 space-y-1">
+          <p className="px-3 py-1 text-xs font-semibold text-orange-400 uppercase tracking-wider">Other Apps</p>
+          <Link
+            href="/admin"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-orange-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Invoice Ingestor
+          </Link>
           <Link
             href="/matcher"
             className="flex items-center gap-2 px-3 py-2 text-sm text-orange-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <GitMerge className="w-4 h-4" />
-            Matcher App
+            Invoice Matcher
           </Link>
           <Link
             href="/"
             className="flex items-center gap-2 px-3 py-2 text-sm text-orange-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <Globe className="w-4 h-4" />
-            Home
+            Landing Page
           </Link>
         </div>
       </aside>
