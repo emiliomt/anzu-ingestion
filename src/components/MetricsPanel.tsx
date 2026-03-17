@@ -13,6 +13,16 @@ interface Metrics {
   avgConfidence: number | null;
 }
 
+interface CardDef {
+  label: string;
+  value: number;
+  Icon: React.ElementType;
+  iconColor: string;
+  iconBg: string;
+  sub?: string;
+  warning?: boolean;
+}
+
 export function MetricsPanel() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
 
@@ -34,10 +44,13 @@ export function MetricsPanel() {
 
   if (!metrics) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 p-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 px-6 py-4">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="card p-4 animate-pulse">
-            <div className="h-4 bg-gray-100 rounded mb-2 w-3/4" />
+          <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 animate-pulse">
+            <div className="flex items-start justify-between mb-3">
+              <div className="h-3 bg-gray-100 rounded w-3/4" />
+              <div className="w-9 h-9 bg-gray-100 rounded-lg" />
+            </div>
             <div className="h-7 bg-gray-100 rounded w-1/2" />
           </div>
         ))}
@@ -45,63 +58,74 @@ export function MetricsPanel() {
     );
   }
 
-  const cards = [
+  const cards: CardDef[] = [
     {
       label: "Total Today",
       value: metrics.totalToday,
-      icon: <TrendingUp className="w-4 h-4 text-indigo-500" />,
+      Icon: TrendingUp,
+      iconColor: "#2563EB",
+      iconBg: "#EEF2FF",
       sub: `${metrics.total} all time`,
-      color: "text-indigo-700",
     },
     {
       label: "Web",
       value: metrics.byChannel.web,
-      icon: <Globe className="w-4 h-4 text-sky-500" />,
-      color: "text-sky-700",
+      Icon: Globe,
+      iconColor: "#0EA5E9",
+      iconBg: "#E0F2FE",
     },
     {
       label: "Email",
       value: metrics.byChannel.email,
-      icon: <Mail className="w-4 h-4 text-orange-500" />,
-      color: "text-orange-700",
+      Icon: Mail,
+      iconColor: "#F97316",
+      iconBg: "#FFF7ED",
     },
     {
       label: "WhatsApp",
       value: metrics.byChannel.whatsapp,
-      icon: <MessageCircle className="w-4 h-4 text-green-500" />,
-      color: "text-green-700",
+      Icon: MessageCircle,
+      iconColor: "#10B981",
+      iconBg: "#ECFDF5",
     },
     {
       label: "Flagged",
       value: metrics.flagged,
-      icon: <Flag className="w-4 h-4 text-red-500" />,
-      color: "text-red-700",
+      Icon: Flag,
+      iconColor: "#EF4444",
+      iconBg: "#FEE2E2",
       warning: metrics.flagged > 0,
     },
     {
       label: "Duplicates",
       value: metrics.duplicates,
-      icon: <Copy className="w-4 h-4 text-amber-500" />,
-      color: "text-amber-700",
+      Icon: Copy,
+      iconColor: "#F59E0B",
+      iconBg: "#FFFBEB",
       warning: metrics.duplicates > 0,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-4">
-      {cards.map((card) => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 px-6 py-4">
+      {cards.map(({ label, value, Icon, iconColor, iconBg, sub, warning }) => (
         <div
-          key={card.label}
-          className={`card p-4 ${card.warning ? "border-red-100 bg-red-50" : ""}`}
+          key={label}
+          className={`bg-white rounded-xl border p-5 transition-shadow hover:shadow-md ${
+            warning ? "border-red-200" : "border-gray-200"
+          }`}
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-500 font-medium">{card.label}</span>
-            {card.icon}
+          <div className="flex items-start justify-between mb-3">
+            <p className="text-sm text-gray-500">{label}</p>
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: warning ? "#FEE2E2" : iconBg }}
+            >
+              <Icon style={{ color: warning ? "#EF4444" : iconColor, width: "18px", height: "18px" }} />
+            </div>
           </div>
-          <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
-          {card.sub && (
-            <div className="text-xs text-gray-400 mt-0.5">{card.sub}</div>
-          )}
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
+          {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
         </div>
       ))}
     </div>

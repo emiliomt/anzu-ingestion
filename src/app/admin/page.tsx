@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { InvoiceTable } from "@/components/InvoiceTable";
 import { InvoiceDetail } from "@/components/InvoiceDetail";
 import { MetricsPanel } from "@/components/MetricsPanel";
@@ -23,19 +22,18 @@ export default function AdminDashboard() {
   return (
     <>
       {/* Top bar */}
-      <header className="h-16 bg-white border-b border-gray-100 flex items-center px-6 flex-shrink-0 pl-16 lg:pl-6 gap-4">
-        <Link
-          href="/"
-          className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Menu
-        </Link>
-        <div className="w-px h-5 bg-gray-200" />
+      <header className="bg-white border-b border-gray-100 flex items-center justify-between px-6 py-4 flex-shrink-0 pl-16 lg:pl-6">
         <div>
-          <h1 className="text-base font-semibold text-gray-900">Invoice Dashboard</h1>
-          <p className="text-xs text-gray-400">Review and manage incoming invoices</p>
+          <h1 className="text-lg font-bold text-gray-900">Invoice Dashboard</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Review and manage incoming invoices</p>
         </div>
+        <button
+          onClick={() => setTableRefreshKey((k) => k + 1)}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors bg-white"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Refresh
+        </button>
       </header>
 
       {/* Metrics */}
