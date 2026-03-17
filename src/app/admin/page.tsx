@@ -21,11 +21,11 @@ export default function AdminDashboard() {
 
   return (
     <>
-      {/* Top bar */}
-      <header className="bg-white border-b border-gray-100 flex items-center justify-between px-6 py-4 flex-shrink-0 pl-16 lg:pl-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between px-6 py-4 flex-shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-gray-900">Invoice Dashboard</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Review and manage incoming invoices</p>
+          <h1 className="text-lg font-bold text-gray-900">Dashboard</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Invoice Ingestor · Anzu Dynamics</p>
         </div>
         <button
           onClick={() => setTableRefreshKey((k) => k + 1)}
@@ -34,7 +34,7 @@ export default function AdminDashboard() {
           <RefreshCw className="w-3.5 h-3.5" />
           Refresh
         </button>
-      </header>
+      </div>
 
       {/* Metrics */}
       <div className="flex-shrink-0">
