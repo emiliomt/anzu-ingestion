@@ -135,9 +135,13 @@ export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
         style={{ background: "#0C1B3A" }}
       >
         {/* Logo row */}
-        <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
-          <AnzuLogo variant="icon" size={30} className="xl:hidden" />
-          <AnzuLogo variant="full" scheme="dark" size={30} animate className="hidden xl:block" />
+        <div className="flex items-center px-4 h-16 border-b border-white/10 shrink-0 overflow-hidden">
+          <div className="xl:hidden">
+            <AnzuLogo variant="icon" size={30} />
+          </div>
+          <div className="hidden xl:block">
+            <AnzuLogo variant="full" scheme="dark" size={30} animate />
+          </div>
         </div>
 
         <div className="flex-1 flex flex-col min-h-0">
