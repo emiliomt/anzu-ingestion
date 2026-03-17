@@ -122,8 +122,18 @@ export async function POST(request: NextRequest) {
 
       // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
       scheduleBackground(
-        processInvoice(invoice.id, buffer, stored.mimeType, submittedBy).catch((err) => {
+        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy).catch(async (err) => {
           console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
+          // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
+          // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
+          try {
+            await prisma.invoice.update({
+              where: { id: invoice.id },
+              data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+            });
+          } catch (updateErr) {
+            console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+          }
         })
       );
 
@@ -156,6 +166,7 @@ export async function POST(request: NextRequest) {
 /** Background: extract invoice data using Claude, then update DB */
 async function processInvoice(
   invoiceId: string,
+  referenceNo: string,
   buffer: Buffer,
   mimeType: string,
   submittedBy: string | null
@@ -381,7 +392,7 @@ async function processInvoice(
 
       sendConfirmationEmail({
         to: submittedBy,
-        referenceNo: (await prisma.invoice.findUnique({ where: { id: invoiceId } }))!.referenceNo,
+        referenceNo,
         vendorName: typeof vendorName === "string" ? vendorName : undefined,
         total:
           total != null && currency

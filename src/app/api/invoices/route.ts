@@ -7,8 +7,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
-  const page = parseInt(searchParams.get("page") ?? "1");
-  const limit = parseInt(searchParams.get("limit") ?? "25");
+  const rawPage = parseInt(searchParams.get("page") ?? "1");
+  const rawLimit = parseInt(searchParams.get("limit") ?? "25");
+  // Clamp to safe ranges — prevents division-by-zero (limit=0 → Infinity pages)
+  // and negative skip values (page<1) that produce wrong Prisma results.
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 100) : 25;
   const search = searchParams.get("search") ?? "";
   const status = searchParams.get("status") ?? "";
   const channel = searchParams.get("channel") ?? "";
@@ -68,6 +72,8 @@ export async function GET(request: NextRequest) {
   const formatted = invoices.map((inv) => {
     const totalField = inv.extractedData.find((f) => f.fieldName === "total");
     const currField = inv.extractedData.find((f) => f.fieldName === "currency");
+    // Parse once and guard against NaN — Claude may return non-numeric strings like "N/A"
+    const totalNum = totalField?.value != null ? Number(totalField.value) : NaN;
 
     return {
       id: inv.id,
@@ -82,10 +88,10 @@ export async function GET(request: NextRequest) {
       flags: safeJsonParse<string[]>(inv.flags, []),
       vendorName: inv.vendor?.name ?? null,
       totalAmount:
-        totalField?.value && currField?.value
-          ? `${currField.value} ${Number(totalField.value).toFixed(2)}`
-          : totalField?.value
-          ? `${Number(totalField.value).toFixed(2)}`
+        !isNaN(totalNum) && currField?.value
+          ? `${currField.value} ${totalNum.toFixed(2)}`
+          : !isNaN(totalNum)
+          ? totalNum.toFixed(2)
           : null,
     };
   });

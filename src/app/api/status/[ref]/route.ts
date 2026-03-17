@@ -37,6 +37,9 @@ export async function GET(
     (f) => f.fieldName === "invoice_number"
   );
 
+  // Parse once and guard against NaN — Claude may return non-numeric strings like "N/A"
+  const totalNum = totalField?.value != null ? Number(totalField.value) : NaN;
+
   return NextResponse.json({
     referenceNo: invoice.referenceNo,
     status: invoice.status,
@@ -44,8 +47,8 @@ export async function GET(
     vendorName: invoice.vendor?.name ?? null,
     invoiceNumber: invNumField?.value ?? null,
     totalAmount:
-      totalField?.value && currField?.value
-        ? `${currField.value} ${Number(totalField.value).toFixed(2)}`
+      !isNaN(totalNum) && currField?.value
+        ? `${currField.value} ${totalNum.toFixed(2)}`
         : null,
     submittedAt: invoice.submittedAt.toISOString(),
     processedAt: invoice.processedAt?.toISOString() ?? null,

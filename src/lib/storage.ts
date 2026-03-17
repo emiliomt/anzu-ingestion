@@ -135,6 +135,9 @@ export async function getPresignedUrl(fileUrl: string, expiresIn = 3600): Promis
 function parseS3Url(s3Url: string): { bucket: string; key: string } {
   const withoutPrefix = s3Url.slice("s3://".length);
   const slashIdx = withoutPrefix.indexOf("/");
+  if (slashIdx === -1) {
+    throw new Error(`Invalid S3 URL — missing key path: "${s3Url}"`);
+  }
   return {
     bucket: withoutPrefix.slice(0, slashIdx),
     key: withoutPrefix.slice(slashIdx + 1),

@@ -93,9 +93,20 @@ export async function POST(request: NextRequest) {
     if (!firstRefNo) firstRefNo = referenceNo;
     processed++;
 
-    // Extract async
+    // Extract async — fallback ensures invoice never stays stuck in "processing"
+    // if processEmailInvoice throws before its own try/catch (e.g. getSettings fails).
     processEmailInvoice(invoice.id, buffer, stored.mimeType, senderEmail).catch(
-      console.error
+      async (err) => {
+        console.error(`[Email Extract] Failed for invoice ${invoice.id}:`, err);
+        try {
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+          });
+        } catch (updateErr) {
+          console.error(`[Email Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+        }
+      }
     );
   }
 
@@ -140,7 +151,7 @@ async function processEmailInvoice(
     const vendorNameValue = extraction.vendor_name?.value;
 
     let vendorId: string | null = null;
-    if (vendorNameValue && typeof vendorNameValue === "string") {
+    if (vendorNameValue && typeof vendorNameValue === "string" && vendorNameValue.trim()) {
       const existing = await prisma.vendor.findFirst({
         where: { name: { equals: vendorNameValue.trim() } },
       });

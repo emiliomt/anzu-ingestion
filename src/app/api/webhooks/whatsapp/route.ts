@@ -157,7 +157,8 @@ export async function POST(request: NextRequest) {
 
     if (!firstRefNo) firstRefNo = referenceNo;
 
-    // Extract async, then reply
+    // Extract async, then reply — fallback ensures invoice never stays stuck in "processing"
+    // if processWhatsAppInvoice throws before its own try/catch (e.g. getSettings fails).
     processWhatsAppInvoice(
       invoice.id,
       buffer,
@@ -167,7 +168,17 @@ export async function POST(request: NextRequest) {
       referenceNo,
       accountSid,
       authToken
-    ).catch(console.error);
+    ).catch(async (err) => {
+      console.error(`[WhatsApp Extract] Failed for invoice ${invoice.id}:`, err);
+      try {
+        await prisma.invoice.update({
+          where: { id: invoice.id },
+          data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+        });
+      } catch (updateErr) {
+        console.error(`[WhatsApp Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+      }
+    });
   }
 
   if (firstRefNo) {
@@ -206,7 +217,7 @@ async function processWhatsAppInvoice(
     const vendorNameValue = extraction.vendor_name?.value;
 
     let vendorId: string | null = null;
-    if (vendorNameValue && typeof vendorNameValue === "string") {
+    if (vendorNameValue && typeof vendorNameValue === "string" && vendorNameValue.trim()) {
       const existing = await prisma.vendor.findFirst({
         where: { name: { equals: vendorNameValue.trim() } },
       });
