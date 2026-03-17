@@ -42,7 +42,7 @@ model Invoice {
   isDuplicate  Boolean          @default(false)
   duplicateOf  String?          // references another invoice id
   ocrText      String?          // cleaned OCR text — stored for few-shot learning & fine-tuning
-  updatedAt    DateTime         @updatedAt
+  updatedAt    DateTime         @default(now()) @updatedAt
 
   // ── Human Corrections & Fine-Tuning ─────────────────────────────────────────
   // correctedData stored as JSON string for SQLite compat; swap to Json? on PostgreSQL-only
