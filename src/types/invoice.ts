@@ -20,6 +20,7 @@ export interface InvoiceListItem {
   flags: string[];
   vendorName: string | null;
   totalAmount: string | null;
+  confidence: number | null;
 }
 
 export interface ExtractedFieldData {

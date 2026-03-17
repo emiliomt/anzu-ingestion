@@ -61,8 +61,7 @@ export async function GET(request: NextRequest) {
       include: {
         vendor: { select: { name: true } },
         extractedData: {
-          where: { fieldName: { in: ["total", "currency", "invoice_number"] } },
-          select: { fieldName: true, value: true },
+          select: { fieldName: true, value: true, confidence: true },
         },
       },
     }),
@@ -74,6 +73,14 @@ export async function GET(request: NextRequest) {
     const currField = inv.extractedData.find((f) => f.fieldName === "currency");
     // Parse once and guard against NaN — Claude may return non-numeric strings like "N/A"
     const totalNum = totalField?.value != null ? Number(totalField.value) : NaN;
+
+    // Avg confidence across all extracted fields that have a confidence value
+    const confValues = inv.extractedData
+      .map((f) => f.confidence)
+      .filter((c): c is number => c != null);
+    const avgConfidence = confValues.length > 0
+      ? Math.round(confValues.reduce((a, b) => a + b, 0) / confValues.length * 100)
+      : null;
 
     return {
       id: inv.id,
@@ -93,6 +100,7 @@ export async function GET(request: NextRequest) {
           : !isNaN(totalNum)
           ? totalNum.toFixed(2)
           : null,
+      confidence: avgConfidence,
     };
   });
 

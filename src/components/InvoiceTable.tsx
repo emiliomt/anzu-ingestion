@@ -272,6 +272,9 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
                   Submitted
                 </th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wider">
+                  Confidence
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wider">
                   Flags
                 </th>
               </tr>
@@ -321,6 +324,37 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
                     {format(new Date(inv.submittedAt), "MMM d, HH:mm")}
+                  </td>
+                  <td className="px-4 py-3">
+                    {inv.confidence != null ? (
+                      <div className="flex items-center gap-2 min-w-[80px]">
+                        <div className="flex-1 h-1.5 rounded-full bg-gray-100">
+                          <div
+                            className="h-1.5 rounded-full transition-all"
+                            style={{
+                              width: `${inv.confidence}%`,
+                              background:
+                                inv.confidence >= 90 ? "#10B981"
+                                : inv.confidence >= 75 ? "#F59E0B"
+                                : "#EF4444",
+                            }}
+                          />
+                        </div>
+                        <span
+                          className="text-xs font-medium tabular-nums"
+                          style={{
+                            color:
+                              inv.confidence >= 90 ? "#10B981"
+                              : inv.confidence >= 75 ? "#F59E0B"
+                              : "#EF4444",
+                          }}
+                        >
+                          {inv.confidence}%
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
