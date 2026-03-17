@@ -1,18 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { FineTuneListItem } from "@/types/fine-tune";
 
 export const dynamic = "force-dynamic";
-
-export interface FineTuneListItem {
-  id: string;
-  referenceNo: string;
-  vendorName: string | null;
-  total: number | null;
-  currency: string | null;
-  hasOcrText: boolean;
-  hasCorrectedData: boolean;
-  updatedAt: string;
-}
 
 /**
  * GET /api/fine-tune/list
@@ -46,7 +36,6 @@ export async function GET() {
       inv.extractedData.map((f) => [f.fieldName, f.value])
     );
 
-    // If correctedData exists, prefer its values for vendor_name / total / currency
     let vendorName = fieldMap["vendor_name"] ?? null;
     let total: number | null = fieldMap["total"] ? Number(fieldMap["total"]) : null;
     let currency = fieldMap["currency"] ?? null;

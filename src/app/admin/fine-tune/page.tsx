@@ -5,12 +5,9 @@ import {
   Download, RefreshCw, Loader2, AlertCircle,
   CheckCircle2, FileJson, Info, Upload,
 } from "lucide-react";
-import type { FineTuneListItem } from "@/app/api/fine-tune/list/route";
+import type { FineTuneListItem, FineTuneListResponse } from "@/types/fine-tune";
 
-interface ListResponse {
-  items: FineTuneListItem[];
-  counts: { ready: number; pending: number; uploaded: number };
-}
+type ListResponse = FineTuneListResponse;
 
 function formatAmount(total: number | null, currency: string | null): string {
   if (total == null) return "—";
