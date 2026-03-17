@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TrendingUp, Globe, Mail, MessageCircle, Flag, Copy } from "lucide-react";
+import { FileText, Clock, AlertTriangle, Zap, TrendingUp, TrendingDown } from "lucide-react";
 
 interface Metrics {
   total: number;
@@ -11,16 +11,6 @@ interface Metrics {
   flagged: number;
   duplicates: number;
   avgConfidence: number | null;
-}
-
-interface CardDef {
-  label: string;
-  value: number;
-  Icon: React.ElementType;
-  iconColor: string;
-  iconBg: string;
-  sub?: string;
-  warning?: boolean;
 }
 
 export function MetricsPanel() {
@@ -44,88 +34,83 @@ export function MetricsPanel() {
 
   if (!metrics) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 px-6 py-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 animate-pulse">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-6 flex-shrink-0">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bg-white rounded-2xl p-4 animate-pulse" style={{ border: "1px solid #F1F5F9" }}>
             <div className="flex items-start justify-between mb-3">
-              <div className="h-3 bg-gray-100 rounded w-3/4" />
-              <div className="w-9 h-9 bg-gray-100 rounded-lg" />
+              <div className="w-9 h-9 bg-gray-100 rounded-xl" />
             </div>
-            <div className="h-7 bg-gray-100 rounded w-1/2" />
+            <div className="h-7 bg-gray-100 rounded w-1/3 mb-1" />
+            <div className="h-3 bg-gray-100 rounded w-2/3" />
           </div>
         ))}
       </div>
     );
   }
 
-  const cards: CardDef[] = [
+  const pending = metrics.byStatus?.pending ?? metrics.byStatus?.received ?? 0;
+  const confidence = metrics.avgConfidence != null
+    ? `${metrics.avgConfidence.toFixed(1)}%`
+    : "—";
+
+  const cards = [
     {
-      label: "Total Today",
-      value: metrics.totalToday,
-      Icon: TrendingUp,
-      iconColor: "#2563EB",
-      iconBg: "#EEF2FF",
+      label: "Processed Today",
+      value: String(metrics.totalToday),
       sub: `${metrics.total} all time`,
+      Icon: FileText,
+      color: "#F97316",
+      trend: "up" as const,
     },
     {
-      label: "Web",
-      value: metrics.byChannel.web,
-      Icon: Globe,
-      iconColor: "#0EA5E9",
-      iconBg: "#E0F2FE",
+      label: "Pending",
+      value: String(pending),
+      sub: pending > 0 ? "Require review" : "All clear",
+      Icon: Clock,
+      color: "#F59E0B",
+      trend: "neutral" as const,
     },
     {
-      label: "Email",
-      value: metrics.byChannel.email,
-      Icon: Mail,
-      iconColor: "#F97316",
-      iconBg: "#FFF7ED",
+      label: "Exceptions",
+      value: String(metrics.flagged),
+      sub: metrics.flagged > 0 ? "Require attention" : "All clear",
+      Icon: AlertTriangle,
+      color: "#EF4444",
+      trend: metrics.flagged > 0 ? "down" as const : "up" as const,
     },
     {
-      label: "WhatsApp",
-      value: metrics.byChannel.whatsapp,
-      Icon: MessageCircle,
-      iconColor: "#10B981",
-      iconBg: "#ECFDF5",
-    },
-    {
-      label: "Flagged",
-      value: metrics.flagged,
-      Icon: Flag,
-      iconColor: "#EF4444",
-      iconBg: "#FEE2E2",
-      warning: metrics.flagged > 0,
-    },
-    {
-      label: "Duplicates",
-      value: metrics.duplicates,
-      Icon: Copy,
-      iconColor: "#F59E0B",
-      iconBg: "#FFFBEB",
-      warning: metrics.duplicates > 0,
+      label: "AI Accuracy",
+      value: confidence,
+      sub: "Avg extraction confidence",
+      Icon: Zap,
+      color: "#10B981",
+      trend: "up" as const,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 px-6 py-4">
-      {cards.map(({ label, value, Icon, iconColor, iconBg, sub, warning }) => (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-6 flex-shrink-0">
+      {cards.map(({ label, value, sub, Icon, color, trend }) => (
         <div
           key={label}
-          className={`bg-white rounded-xl border p-5 transition-shadow hover:shadow-md ${
-            warning ? "border-red-200" : "border-gray-200"
-          }`}
+          className="bg-white rounded-2xl p-4"
+          style={{ border: "1px solid #F1F5F9", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
         >
           <div className="flex items-start justify-between mb-3">
-            <p className="text-sm text-gray-500">{label}</p>
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: warning ? "#FEE2E2" : iconBg }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: `${color}18` }}
             >
-              <Icon style={{ color: warning ? "#EF4444" : iconColor, width: "18px", height: "18px" }} />
+              <Icon className="w-4 h-4" style={{ color }} />
             </div>
+            {trend === "up" && <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />}
+            {trend === "down" && <TrendingDown className="w-3.5 h-3.5 text-red-500" />}
           </div>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-          {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+          <div className="text-2xl font-bold text-gray-900 mb-0.5" style={{ letterSpacing: "-0.02em" }}>
+            {value}
+          </div>
+          <div className="text-xs text-gray-400">{label}</div>
+          <div className="text-xs mt-0.5" style={{ color }}>{sub}</div>
         </div>
       ))}
     </div>

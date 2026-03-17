@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { RefreshCw } from "lucide-react";
 import { InvoiceTable } from "@/components/InvoiceTable";
 import { InvoiceDetail } from "@/components/InvoiceDetail";
 import { MetricsPanel } from "@/components/MetricsPanel";
@@ -21,21 +20,6 @@ export default function AdminDashboard() {
 
   return (
     <>
-      {/* Page header */}
-      <div className="flex items-center justify-between px-6 py-4 flex-shrink-0">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">Dashboard</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Invoice Ingestor · Anzu Dynamics</p>
-        </div>
-        <button
-          onClick={() => setTableRefreshKey((k) => k + 1)}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors bg-white"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Refresh
-        </button>
-      </div>
-
       {/* Metrics */}
       <div className="flex-shrink-0">
         <MetricsPanel />

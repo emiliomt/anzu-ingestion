@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   LayoutDashboard, FileText, Settings,
   Globe, X, BrainCircuit, Sparkles,
-  GitMerge, BookOpen,
+  GitMerge, BookOpen, ExternalLink,
 } from "lucide-react";
 import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
@@ -20,7 +20,7 @@ const NAV_ITEMS = [
 const OTHER_APPS = [
   { href: "/matcher",       label: "Invoice Matcher",  icon: GitMerge },
   { href: "/preaccounting", label: "Pre-Accounting",   icon: BookOpen },
-  { href: "/portal",        label: "Provider Portal",  icon: Globe },
+  { href: "/portal",        label: "Vendor Portal",    icon: Globe },
 ];
 
 interface AdminSidebarProps {
@@ -34,94 +34,72 @@ export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
   const isActive = (href: string, exact: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
 
-  const linkClass = (active: boolean) =>
-    `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 relative group ${
-      active ? "text-white" : "text-gray-400 hover:text-white hover:bg-white/10"
-    }`;
-
-  function NavContent({ showLabels }: { showLabels: boolean }) {
+  function SidebarContent() {
     return (
       <>
-        {/* Company context */}
-        {showLabels && (
-          <div
-            className="mx-3 mt-4 mb-2 px-3 py-2.5 rounded-lg border border-white/10"
-            style={{ background: "rgba(255,255,255,0.05)" }}
-          >
-            <div className="flex items-center gap-2">
-              <div
-                className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white shrink-0"
-                style={{ background: "#F97316" }}
-              >
-                A
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-xs font-medium truncate">Anzu Ingestion</div>
-                <div className="text-gray-400 text-xs">Pro Plan</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+        {/* Primary nav */}
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
             const active = isActive(href, exact);
             return (
-              <Link key={href} href={href} onClick={onMobileClose} className={linkClass(active)}>
-                {active && (
-                  <div
-                    className="absolute inset-0 rounded-lg"
-                    style={{ background: "linear-gradient(135deg, rgba(249,115,22,0.85), rgba(234,88,12,0.85))" }}
-                  />
-                )}
-                <Icon className="w-5 h-5 shrink-0 relative z-10" />
-                {showLabels && <span className="text-sm relative z-10">{label}</span>}
-              </Link>
-            );
-          })}
-
-          {showLabels ? (
-            <div className="pt-4 pb-1">
-              <p className="px-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Other Apps</p>
-            </div>
-          ) : (
-            <div className="pt-2 border-t border-white/10 mx-2" />
-          )}
-
-          {OTHER_APPS.map(({ href, label, icon: Icon }) => {
-            const active = isActive(href, false);
-            return (
-              <Link key={href} href={href} onClick={onMobileClose} className={linkClass(active)}>
-                {active && (
-                  <div
-                    className="absolute inset-0 rounded-lg"
-                    style={{ background: "linear-gradient(135deg, rgba(249,115,22,0.85), rgba(234,88,12,0.85))" }}
-                  />
-                )}
-                <Icon className="w-5 h-5 shrink-0 relative z-10" />
-                {showLabels && <span className="text-sm relative z-10">{label}</span>}
+              <Link
+                key={href}
+                href={href}
+                onClick={onMobileClose}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150"
+                style={{
+                  background: active ? "rgba(249,115,22,0.18)" : "transparent",
+                  color: active ? "#FB923C" : "rgba(255,255,255,0.55)",
+                  borderLeft: active ? "2px solid #F97316" : "2px solid transparent",
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.06)";
+                    (e.currentTarget as HTMLAnchorElement).style.color = "rgba(255,255,255,0.85)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+                    (e.currentTarget as HTMLAnchorElement).style.color = "rgba(255,255,255,0.55)";
+                  }
+                }}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span>{label}</span>
               </Link>
             );
           })}
         </nav>
 
-        {/* User row */}
-        <div className="border-t border-white/10 px-2 py-3">
-          {showLabels && (
-            <div className="flex items-center gap-3 px-3 py-2.5">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
-                style={{ background: "#F97316" }}
+        {/* Other apps */}
+        <div className="px-3 pb-5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "12px" }}>
+          <p className="px-3 py-2 text-xs uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.28)" }}>
+            Other Apps
+          </p>
+          <div className="space-y-0.5">
+            {OTHER_APPS.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                onClick={onMobileClose}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 group"
+                style={{ color: "rgba(255,255,255,0.45)" }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.06)";
+                  (e.currentTarget as HTMLAnchorElement).style.color = "rgba(255,255,255,0.8)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+                  (e.currentTarget as HTMLAnchorElement).style.color = "rgba(255,255,255,0.45)";
+                }}
               >
-                AD
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-xs font-medium truncate">Admin</div>
-                <div className="text-gray-400 text-xs">admin@anzudynamics.com</div>
-              </div>
-            </div>
-          )}
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span className="flex-1">{label}</span>
+                <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity" />
+              </Link>
+            ))}
+          </div>
         </div>
       </>
     );
@@ -135,23 +113,54 @@ export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
         style={{ background: "#0C1B3A" }}
       >
         {/* Logo row */}
-        <div className="flex items-center px-4 h-16 border-b border-white/10 shrink-0 overflow-hidden">
+        <div
+          className="h-16 flex items-center px-4 flex-shrink-0 gap-3 overflow-hidden"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+        >
+          {/* Icon-only at md */}
           <div className="xl:hidden">
-            <AnzuLogo variant="icon" size={30} />
+            <AnzuLogo variant="icon" size={32} />
           </div>
-          <div className="hidden xl:block">
-            <AnzuLogo variant="full" scheme="dark" size={30} animate />
+          {/* Full logo + Ingestor at xl */}
+          <div className="hidden xl:flex items-center gap-3 min-w-0">
+            <AnzuLogo variant="full" scheme="dark" size={32} animate />
+            <div
+              className="text-xs font-medium shrink-0"
+              style={{
+                color: "rgba(255,255,255,0.35)",
+                borderLeft: "1px solid rgba(255,255,255,0.12)",
+                paddingLeft: "10px",
+              }}
+            >
+              Ingestor
+            </div>
           </div>
         </div>
 
         <div className="flex-1 flex flex-col min-h-0">
-          {/* Icon-only at md (hidden at xl) */}
-          <div className="flex-1 flex flex-col min-h-0 xl:hidden">
-            <NavContent showLabels={false} />
+          {/* Icon-only at md */}
+          <div className="flex-1 flex flex-col min-h-0 xl:hidden px-3 py-4 space-y-0.5 overflow-y-auto">
+            {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
+              const active = isActive(href, exact);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  title={label}
+                  className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-150 mx-auto"
+                  style={{
+                    background: active ? "rgba(249,115,22,0.18)" : "transparent",
+                    color: active ? "#FB923C" : "rgba(255,255,255,0.55)",
+                  }}
+                >
+                  <Icon className="w-4 h-4" />
+                </Link>
+              );
+            })}
           </div>
           {/* Full labels at xl */}
-          <div className="hidden flex-1 flex-col min-h-0 xl:flex">
-            <NavContent showLabels={true} />
+          <div className="hidden xl:flex flex-1 flex-col min-h-0">
+            <SidebarContent />
           </div>
         </div>
       </aside>
@@ -168,17 +177,32 @@ export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
             className="relative flex flex-col w-72 h-full"
             style={{ background: "#0C1B3A", willChange: "transform" }}
           >
-            <div className="flex items-center justify-between px-4 h-16 border-b border-white/10 shrink-0">
-              <AnzuLogo variant="full" scheme="dark" size={28} animate />
+            <div
+              className="flex items-center justify-between px-4 h-16 flex-shrink-0 gap-3"
+              style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <AnzuLogo variant="full" scheme="dark" size={32} animate />
+                <div
+                  className="text-xs font-medium shrink-0"
+                  style={{
+                    color: "rgba(255,255,255,0.35)",
+                    borderLeft: "1px solid rgba(255,255,255,0.12)",
+                    paddingLeft: "10px",
+                  }}
+                >
+                  Ingestor
+                </div>
+              </div>
               <button
                 onClick={onMobileClose}
-                className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="flex-1 flex flex-col min-h-0">
-              <NavContent showLabels={true} />
+              <SidebarContent />
             </div>
           </aside>
         </div>
