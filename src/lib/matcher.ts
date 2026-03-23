@@ -144,6 +144,18 @@ Respond ONLY with a JSON object — no markdown, no explanation outside JSON:
 
   const text = response.choices[0]?.message?.content?.trim() ?? "{}";
 
-  const parsed = JSON.parse(text) as MatchResult;
+  let parsed: MatchResult;
+  try {
+    parsed = JSON.parse(text) as MatchResult;
+  } catch {
+    console.error("[Matcher] Invalid JSON from GPT-4o-mini:", text.slice(0, 300));
+    return {
+      matchType: "unmatched",
+      matchId: null,
+      matchLabel: "No match found",
+      confidence: 0,
+      reasoning: "Failed to parse AI response.",
+    };
+  }
   return parsed;
 }
