@@ -4,6 +4,7 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { sendConfirmationEmail, sendBounceEmail } from "@/lib/email";
 import { getSettings } from "@/lib/app-settings";
+import { verifyEmailWebhook } from "@/lib/webhook-auth";
 
 export const dynamic = "force-dynamic";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
@@ -14,6 +15,11 @@ import { generateReferenceNo, isValidMime } from "@/lib/utils";
  * Each incoming email with invoice attachments is processed as individual invoices.
  */
 export async function POST(request: NextRequest) {
+  // Verify the request originated from SendGrid
+  if (!verifyEmailWebhook(request.url, process.env.SENDGRID_WEBHOOK_SECRET)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
