@@ -14,6 +14,7 @@
  * Returns: { pos: NormalizedPO[] }
  */
 import { NextRequest, NextResponse } from "next/server";
+import { validateExternalUrl } from "@/lib/ssrf-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -92,6 +93,11 @@ export async function POST(request: NextRequest) {
 
   if (!body.url) {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
+  }
+
+  const urlCheck = validateExternalUrl(body.url);
+  if (!urlCheck.ok) {
+    return NextResponse.json({ error: urlCheck.error }, { status: 400 });
   }
 
   const headers: Record<string, string> = {
