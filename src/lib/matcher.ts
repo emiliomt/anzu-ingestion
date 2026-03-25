@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
+import { sanitizeForPrompt } from "@/lib/few-shot";
 
 let _client: OpenAI | null = null;
 function getClient(): OpenAI {
@@ -69,23 +70,26 @@ export async function suggestMatch(invoiceId: string): Promise<MatchResult> {
     }
   }
 
-  // Build context for GPT-4o-mini
+  // Build context for GPT-4o-mini (all DB-sourced values sanitized against prompt injection)
+  const s = (v: string | null | undefined, max = 100) =>
+    sanitizeForPrompt(v ?? null, max);
+
   const invoiceContext = `
 INVOICE TO MATCH:
-- Reference: ${invoice.referenceNo}
-- Vendor: ${fieldMap["vendor_name"] ?? invoice.vendor?.name ?? "Unknown"}
-- Total: ${fieldMap["total"] ?? "Unknown"} ${fieldMap["currency"] ?? ""}
-- PO Reference on invoice: ${poRef ?? "None"}
-- Project name on invoice: ${fieldMap["project_name"] ?? "None"}
-- Project city: ${fieldMap["project_city"] ?? "None"}
-- Concept: ${fieldMap["concept"] ?? "None"}
-- Line items: ${invoice.lineItems.map((l) => l.description).filter(Boolean).join(", ") || "None"}
+- Reference: ${s(invoice.referenceNo)}
+- Vendor: ${s(fieldMap["vendor_name"] ?? invoice.vendor?.name ?? "Unknown")}
+- Total: ${s(fieldMap["total"] ?? "Unknown")} ${s(fieldMap["currency"] ?? "")}
+- PO Reference on invoice: ${s(poRef ?? "None")}
+- Project name on invoice: ${s(fieldMap["project_name"] ?? "None")}
+- Project city: ${s(fieldMap["project_city"] ?? "None")}
+- Concept: ${s(fieldMap["concept"] ?? "None", 200)}
+- Line items: ${invoice.lineItems.map((l) => s(l.description, 50)).filter(Boolean).join(", ") || "None"}
 `.trim();
 
   const projectsContext =
     projects.length > 0
       ? projects
-          .map((p) => `  - ID: ${p.id} | Name: "${p.name}" | Code: ${p.code ?? "-"} | City: ${p.city ?? "-"}`)
+          .map((p) => `  - ID: ${p.id} | Name: "${s(p.name)}" | Code: ${s(p.code ?? "-")} | City: ${s(p.city ?? "-")}`)
           .join("\n")
       : "  (none)";
 
@@ -94,7 +98,7 @@ INVOICE TO MATCH:
       ? purchaseOrders
           .map(
             (po) =>
-              `  - ID: ${po.id} | PO#: "${po.poNumber}" | Vendor: ${po.vendorName ?? "-"} | Amount: ${po.totalAmount ?? "-"} ${po.currency} | Project: ${po.project?.name ?? "-"}`
+              `  - ID: ${po.id} | PO#: "${s(po.poNumber)}" | Vendor: ${s(po.vendorName ?? "-")} | Amount: ${s(String(po.totalAmount ?? "-"))} ${s(po.currency)} | Project: ${s(po.project?.name ?? "-")}`
           )
           .join("\n")
       : "  (none)";
@@ -102,7 +106,7 @@ INVOICE TO MATCH:
   const ccContext =
     cajaChicas.length > 0
       ? cajaChicas
-          .map((cc) => `  - ID: ${cc.id} | Name: "${cc.name}" | Period: ${cc.period ?? "-"} | Balance: ${cc.balance ?? "-"} ${cc.currency}`)
+          .map((cc) => `  - ID: ${cc.id} | Name: "${s(cc.name)}" | Period: ${s(cc.period ?? "-")} | Balance: ${s(String(cc.balance ?? "-"))} ${s(cc.currency)}`)
           .join("\n")
       : "  (none)";
 

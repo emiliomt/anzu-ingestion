@@ -41,7 +41,7 @@ const VALID_FIELD_NAMES = new Set([
  * - Collapses runs of whitespace.
  * - Truncates to `maxLen` so a very long value cannot crowd out real context.
  */
-function sanitizeForPrompt(value: string | null, maxLen = 200): string {
+export function sanitizeForPrompt(value: string | null, maxLen = 200): string {
   if (value === null) return "null";
   return value
     .replace(/[\x00-\x1F\x7F]/g, " ") // all ASCII control chars → space

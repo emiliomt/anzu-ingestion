@@ -48,11 +48,17 @@ export function verifyEmailWebhook(
   configuredSecret: string | undefined
 ): boolean {
   if (!configuredSecret) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[webhook/email] SENDGRID_WEBHOOK_SECRET is not set in production — rejecting request."
+      );
+      return false;
+    }
     console.warn(
-      "[webhook/email] SENDGRID_WEBHOOK_SECRET is not set — signature verification skipped. " +
+      "[webhook/email] SENDGRID_WEBHOOK_SECRET is not set — signature verification skipped (dev only). " +
       "Set the env var and add ?secret=<value> to your SendGrid webhook URL."
     );
-    return true; // permissive in dev
+    return true;
   }
 
   try {
@@ -91,11 +97,17 @@ export function verifyTwilioWebhook(
   params: Record<string, string>
 ): boolean {
   if (!authToken) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[webhook/whatsapp] TWILIO_AUTH_TOKEN is not set in production — rejecting request."
+      );
+      return false;
+    }
     console.warn(
-      "[webhook/whatsapp] TWILIO_AUTH_TOKEN is not set — signature verification skipped. " +
+      "[webhook/whatsapp] TWILIO_AUTH_TOKEN is not set — signature verification skipped (dev only). " +
       "Set the env var to enable Twilio request validation."
     );
-    return true; // permissive in dev
+    return true;
   }
 
   if (!signature) {
