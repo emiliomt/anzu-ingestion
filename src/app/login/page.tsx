@@ -2,11 +2,23 @@
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 
 function LoginCard() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/admin";
+  const hasError = searchParams.get("error") === "CredentialsSignin";
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleCredentials(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    await signIn("credentials", { email, password, callbackUrl });
+    setLoading(false);
+  }
 
   return (
     <div
@@ -46,7 +58,6 @@ function LoginCard() {
           className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           style={{ borderColor: "#E2E8F0" }}
         >
-          {/* Google icon */}
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path
               d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"
@@ -67,6 +78,48 @@ function LoginCard() {
           </svg>
           Continue with Google
         </button>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-gray-200" />
+          <span className="text-xs text-gray-400">or</span>
+          <div className="flex-1 h-px bg-gray-200" />
+        </div>
+
+        {/* Credentials form */}
+        <form onSubmit={handleCredentials} className="flex flex-col gap-3">
+          {hasError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              Invalid email or password.
+            </p>
+          )}
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full px-4 py-3 rounded-xl border text-sm text-gray-900 placeholder-gray-400 outline-none focus:ring-2"
+            style={{ borderColor: "#E2E8F0" }}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full px-4 py-3 rounded-xl border text-sm text-gray-900 placeholder-gray-400 outline-none focus:ring-2"
+            style={{ borderColor: "#E2E8F0" }}
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 rounded-xl text-sm font-medium text-white transition-opacity disabled:opacity-60"
+            style={{ background: "linear-gradient(135deg, #4f46e5, #4338ca)" }}
+          >
+            {loading ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
 
         <p className="mt-6 text-center text-xs text-gray-400">
           Access restricted to authorized team members.
