@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/prisma";
+import { validateExternalUrl } from "@/lib/ssrf-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,11 @@ export async function POST(request: NextRequest) {
 
   const { url, apiKey = "", authType = "bearer", format = "json" } = body;
   if (!url) return NextResponse.json({ error: "url is required" }, { status: 400 });
+
+  const urlCheck = validateExternalUrl(url);
+  if (!urlCheck.ok) {
+    return NextResponse.json({ error: urlCheck.error }, { status: 400 });
+  }
 
   // ── Fetch confirmed matches ──────────────────────────────────────────────
   const matches = await prisma.invoiceMatch.findMany({

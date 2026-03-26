@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Menu, Upload, Zap } from "lucide-react";
+import { UserButton } from "@clerk/nextjs";
 
 interface AdminTopbarProps {
   onMenuClick: () => void;
@@ -50,6 +51,11 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
           <Zap className="w-3.5 h-3.5" />
           Process with AI
         </Link>
+
+        {/* Clerk user avatar + sign-out dropdown */}
+        <div className="ml-1">
+          <UserButton />
+        </div>
       </div>
     </header>
   );

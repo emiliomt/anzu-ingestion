@@ -16,6 +16,40 @@ import { prisma } from "./prisma";
 
 const MAX_EXAMPLES = 12;
 
+// ── Prompt-injection sanitization ────────────────────────────────────────────
+
+/**
+ * Known extraction field names. Any fieldName from the DB that is NOT in this
+ * set is replaced with a placeholder rather than being injected into the prompt.
+ */
+const VALID_FIELD_NAMES = new Set([
+  "vendor_name", "vendor_address", "vendor_tax_id",
+  "invoice_number", "issue_date", "due_date",
+  "subtotal", "tax", "total", "currency",
+  "po_reference", "payment_terms", "bank_details",
+  "buyer_name", "buyer_tax_id", "buyer_address",
+  "concept", "project_name", "project_address", "project_city",
+  "description_summary", "notes",
+]);
+
+/**
+ * Strip a DB string of characters that could break out of the quoted context
+ * inside a prompt and inject new instructions.
+ *
+ * - Replaces all control characters (including newlines / carriage returns)
+ *   with a single space so the value cannot start a new prompt line.
+ * - Collapses runs of whitespace.
+ * - Truncates to `maxLen` so a very long value cannot crowd out real context.
+ */
+export function sanitizeForPrompt(value: string | null, maxLen = 200): string {
+  if (value === null) return "null";
+  return value
+    .replace(/[\x00-\x1F\x7F]/g, " ") // all ASCII control chars → space
+    .replace(/\s+/g, " ")              // collapse whitespace runs
+    .trim()
+    .slice(0, maxLen);
+}
+
 /**
  * Build the few-shot section string to inject into the extraction system prompt.
  *
@@ -83,15 +117,21 @@ export async function buildFewShotSection(ocrText: string): Promise<string> {
     return true;
   });
 
-  // ── Format ───────────────────────────────────────────────────────────────────
-  const headerLabel = matchedVendor
-    ? `PAST CORRECTIONS FOR "${matchedVendor.name.toUpperCase()}"`
+  // ── Format (all DB values are sanitized before prompt injection) ─────────────
+  const safeVendorName = matchedVendor
+    ? sanitizeForPrompt(matchedVendor.name, 80).toUpperCase()
+    : null;
+  const headerLabel = safeVendorName
+    ? `PAST CORRECTIONS FOR "${safeVendorName}"`
     : "PAST CORRECTIONS (GENERAL)";
 
-  const lines = unique.map(
-    (c) =>
-      `• ${c.fieldName}: extracted "${c.originalValue ?? "null"}" → correct: "${c.correctedValue}"`
-  );
+  const lines = unique.map((c) => {
+    // Validate fieldName against the known allowlist; reject unknowns.
+    const field = VALID_FIELD_NAMES.has(c.fieldName) ? c.fieldName : "field";
+    const original = sanitizeForPrompt(c.originalValue);
+    const corrected = sanitizeForPrompt(c.correctedValue);
+    return `• ${field}: extracted "${original}" → correct: "${corrected}"`;
+  });
 
   return [
     "",

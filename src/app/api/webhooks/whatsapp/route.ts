@@ -4,6 +4,7 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { generateReferenceNo } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
+import { verifyTwilioWebhook } from "@/lib/webhook-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,23 @@ export async function POST(request: NextRequest) {
   } catch {
     // Try JSON body
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  // Verify the request originated from Twilio using HMAC-SHA1 signature.
+  // Twilio signs the canonical public URL + all POST params alphabetically.
+  const twilioSignature = request.headers.get("x-twilio-signature") ?? "";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+    ?? `https://${request.headers.get("host") ?? "localhost"}`;
+  const webhookUrl = `${appUrl}/api/webhooks/whatsapp`;
+
+  // Collect all text form fields for signature computation (File entries excluded)
+  const sigParams: Record<string, string> = {};
+  formData.forEach((value, key) => {
+    if (typeof value === "string") sigParams[key] = value;
+  });
+
+  if (!verifyTwilioWebhook(process.env.TWILIO_AUTH_TOKEN, twilioSignature, webhookUrl, sigParams)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
   const from = (formData.get("From") as string | null) ?? "";
