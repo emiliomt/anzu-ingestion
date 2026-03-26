@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Upload, Zap, LogOut } from "lucide-react";
-import { useSession, signOut } from "next-auth/react";
-import Image from "next/image";
+import { Menu, Upload, Zap } from "lucide-react";
+import { UserButton } from "@clerk/nextjs";
 
 interface AdminTopbarProps {
   onMenuClick: () => void;
@@ -11,8 +10,6 @@ interface AdminTopbarProps {
 }
 
 export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopbarProps) {
-  const { data: session } = useSession();
-
   return (
     <header
       className="h-16 flex items-center px-4 sm:px-6 gap-4 flex-shrink-0"
@@ -55,31 +52,10 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
           Process with AI
         </Link>
 
-        {/* User avatar + sign-out */}
-        {session?.user && (
-          <div className="flex items-center gap-2 ml-1">
-            {session.user.image ? (
-              <Image
-                src={session.user.image}
-                alt={session.user.name ?? "User"}
-                width={32}
-                height={32}
-                className="rounded-full ring-2 ring-gray-100"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-semibold">
-                {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
-              </div>
-            )}
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-              title="Sign out"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+        {/* Clerk user avatar + sign-out dropdown */}
+        <div className="ml-1">
+          <UserButton />
+        </div>
       </div>
     </header>
   );

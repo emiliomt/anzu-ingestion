@@ -20,13 +20,12 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 # Enable Next.js standalone output (required for Docker deployment)
 ENV NEXT_OUTPUT=standalone
-# Provide dummy env vars so Prisma and Auth.js can initialise at build time.
+# Provide dummy env vars so Prisma and Clerk can initialise at build time.
 # All API routes use `export const dynamic = "force-dynamic"` so no real
 # DB queries or auth checks are made during `next build`.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
-ENV AUTH_SECRET="build-time-placeholder-not-used-at-runtime"
-ENV AUTH_GOOGLE_ID="build-placeholder"
-ENV AUTH_GOOGLE_SECRET="build-placeholder"
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_placeholder"
+ENV CLERK_SECRET_KEY="sk_test_placeholder"
 RUN mkdir -p /app/public
 RUN npm run build
 # cache-bust: 2026-03-13

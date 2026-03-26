@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AuthProvider } from "@/components/AuthProvider";
+import { ClerkProvider } from "@clerk/nextjs";
 
 export const metadata: Metadata = {
   title: "Anzu — Intelligent AP Automation for Mexico & Colombia",
@@ -24,7 +24,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <ClerkProvider>{children}</ClerkProvider>
       </body>
     </html>
   );
