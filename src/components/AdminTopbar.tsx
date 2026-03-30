@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Upload, Zap } from "lucide-react";
+import { Menu, Upload, Zap, LogOut } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 
 interface AdminTopbarProps {
   onMenuClick: () => void;
@@ -9,6 +11,21 @@ interface AdminTopbarProps {
 }
 
 export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopbarProps) {
+  const router = useRouter();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.email) setUserEmail(d.email); })
+      .catch(() => {});
+  }, []);
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
+
   return (
     <header
       className="h-16 flex items-center px-4 sm:px-6 gap-4 flex-shrink-0"
@@ -50,6 +67,22 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
           <Zap className="w-3.5 h-3.5" />
           Process with AI
         </Link>
+
+        {/* User + logout */}
+        {userEmail && (
+          <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+            <span className="hidden md:block text-xs text-gray-500 max-w-[140px] truncate">
+              {userEmail}
+            </span>
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

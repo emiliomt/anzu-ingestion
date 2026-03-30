@@ -19,7 +19,7 @@ import { z } from "zod";
 import { bufferToBase64 } from "./utils";
 import { cleanOcrText } from "./ocr-cleaner";
 import { parseInvoiceXML } from "./xml-parser";
-import { EXTRACTION_SYSTEM_PROMPT } from "./extraction-prompt";
+import { EXTRACTION_SYSTEM_PROMPT, buildCustomFieldsSection, CustomFieldDef } from "./extraction-prompt";
 
 // ── Extraction options (injected from app settings) ───────────────────────────
 export interface ExtractionOptions {
@@ -50,6 +50,12 @@ export interface ExtractionOptions {
    * When omitted or empty, all fields are extracted.
    */
   enabled_fields?: string[];
+  /**
+   * User-defined custom fields to extract alongside the standard fields.
+   * Each field is injected into the system prompt with its key and prompt.
+   * Extracted values are returned in InvoiceExtraction.customFields.
+   */
+  customFields?: CustomFieldDef[];
 }
 
 // ── OpenAI client (lazy — constructor must NOT run at Next.js build time) ─────
@@ -169,6 +175,9 @@ export interface InvoiceExtraction {
   project_city?:        ExtractionField; // City where project is located
   description_summary?: ExtractionField; // Summary of services rendered
   notes?:               ExtractionField; // Observations / footer notes
+
+  /** Custom fields defined by the user — keyed by CustomField.key */
+  customFields?: Record<string, ExtractionField>;
 }
 
 // ── System prompt (shared by both the OCR‑extracted path and direct path) ─────
@@ -336,7 +345,10 @@ async function handleImageOrPdf(
   const truncatedText = cleanedText.slice(0, 4000);
 
   const timeoutMs = opts.timeout_ms ?? 25_000;
-  const systemPrompt = EXTRACTION_SYSTEM_PROMPT + buildContextSection(opts) + fewShotSection;
+  const customFieldsSection = opts.customFields && opts.customFields.length > 0
+    ? buildCustomFieldsSection(opts.customFields)
+    : "";
+  const systemPrompt = EXTRACTION_SYSTEM_PROMPT + buildContextSection(opts) + customFieldsSection + fewShotSection;
   const extractModel = opts.fineTunedModelId ?? EXTRACT_MODEL;
   const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
@@ -383,6 +395,22 @@ async function handleImageOrPdf(
   }
 
   if (!Array.isArray(parsed.line_items)) parsed.line_items = [];
+
+  // Extract custom field values from the raw response
+  if (opts.customFields && opts.customFields.length > 0) {
+    const customFieldValues: Record<string, ExtractionField> = {};
+    const rawObj = rawParsed as Record<string, unknown>;
+    for (const cf of opts.customFields) {
+      const raw = rawObj[cf.key];
+      if (raw && typeof raw === "object" && "value" in raw) {
+        customFieldValues[cf.key] = raw as ExtractionField;
+      } else {
+        customFieldValues[cf.key] = { value: null, confidence: 0 };
+      }
+    }
+    parsed.customFields = customFieldValues;
+  }
+
   return { result: parsed, ocrText: cleanedText };
 }
 

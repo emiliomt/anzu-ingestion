@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
         include: {
           lineItems: true,
           extractedData: {
-            where: { fieldName: { in: ["vendor_name", "invoice_total", "currency", "invoice_date"] } },
+            where: { fieldName: { in: ["vendor_name", "invoice_total", "currency", "invoice_date", "total"] } },
           },
         },
       },
@@ -61,6 +61,8 @@ export async function GET(req: NextRequest) {
   type ProjectBucket = { name: string; total: number; byCategory: Record<string, number>; invoiceIds: Set<string> };
   const byProject: Record<string, ProjectBucket> = {};
   const byMonth: Record<string, { total: number; byCategory: Record<string, number> }> = {};
+  type VendorBucket = { total: number; invoiceCount: number };
+  const byVendor: Record<string, VendorBucket> = {};
   let cajaChicaTotal = 0;
   let regularTotal = 0;
 
@@ -73,8 +75,19 @@ export async function GET(req: NextRequest) {
 
     if (!byMonth[month]) byMonth[month] = { total: 0, byCategory: {} };
 
-    const invoiceTotalField = invoice.extractedData.find((f) => f.fieldName === "invoice_total");
+    const invoiceTotalField =
+      invoice.extractedData.find((f) => f.fieldName === "total") ??
+      invoice.extractedData.find((f) => f.fieldName === "invoice_total");
     const fallbackTotal = parseFloat(invoiceTotalField?.value ?? "0") || 0;
+
+    // Vendor aggregation
+    const vendorName =
+      invoice.extractedData.find((f) => f.fieldName === "vendor_name")?.value?.trim() || "Unknown Vendor";
+    if (!byVendor[vendorName]) byVendor[vendorName] = { total: 0, invoiceCount: 0 };
+    if (!seenInvoices.has(invoice.id)) {
+      byVendor[vendorName].total += fallbackTotal;
+      byVendor[vendorName].invoiceCount++;
+    }
 
     const lineItems = invoice.lineItems.length > 0
       ? invoice.lineItems
@@ -137,6 +150,11 @@ export async function GET(req: NextRequest) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, data]) => ({ month, ...data }));
 
+  const vendorSummary = Object.entries(byVendor)
+    .map(([vendorName, data]) => ({ vendorName, total: data.total, invoiceCount: data.invoiceCount }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
   return NextResponse.json({
     period,
     totals: {
@@ -147,6 +165,7 @@ export async function GET(req: NextRequest) {
     byCategory: categorySummary,
     byProject: projectSummary,
     byMonth: monthSummary,
+    byVendor: vendorSummary,
     invoiceCount: seenInvoices.size,
     matchCount: matches.length,
   });
