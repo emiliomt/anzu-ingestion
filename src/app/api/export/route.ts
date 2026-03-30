@@ -21,6 +21,12 @@ export async function GET(request: NextRequest) {
     };
   }
 
+  // Load custom fields marked for export
+  const customFields = await prisma.customField.findMany({
+    where: { isActive: true, includeInExport: true },
+    orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+  });
+
   const invoices = await prisma.invoice.findMany({
     where,
     orderBy: { submittedAt: "desc" },
@@ -33,7 +39,7 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const fieldNames = [
+  const builtinFieldNames = [
     "vendor_name",
     "vendor_address",
     "invoice_number",
@@ -47,6 +53,13 @@ export async function GET(request: NextRequest) {
     "payment_terms",
   ];
 
+  const customFieldKeys = customFields.map((f) => f.key);
+
+  const allFieldNames = [...builtinFieldNames, ...customFieldKeys];
+
+  const toHeader = (key: string) =>
+    key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
   const headers = [
     "Reference No",
     "Channel",
@@ -56,7 +69,8 @@ export async function GET(request: NextRequest) {
     "File Name",
     "Duplicate",
     "Flags",
-    ...fieldNames.map((f) => f.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())),
+    ...builtinFieldNames.map(toHeader),
+    ...customFields.map((f) => f.name),
   ];
 
   const rows = invoices.map((inv) => {
@@ -72,7 +86,7 @@ export async function GET(request: NextRequest) {
       inv.fileName,
       inv.isDuplicate ? "Yes" : "No",
       flags,
-      ...fieldNames.map((f) => fieldMap.get(f) ?? ""),
+      ...allFieldNames.map((f) => fieldMap.get(f) ?? ""),
     ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
   });
 

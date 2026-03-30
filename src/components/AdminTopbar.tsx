@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Upload, Zap } from "lucide-react";
+import { Menu, Upload, Zap, LogOut } from "lucide-react";
+import { useUser, useClerk } from "@clerk/nextjs";
 
 interface AdminTopbarProps {
   onMenuClick: () => void;
@@ -9,6 +10,9 @@ interface AdminTopbarProps {
 }
 
 export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopbarProps) {
+  const { user } = useUser();
+  const { signOut } = useClerk();
+
   return (
     <header
       className="h-16 flex items-center px-4 sm:px-6 gap-4 flex-shrink-0"
@@ -50,6 +54,22 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
           <Zap className="w-3.5 h-3.5" />
           Process with AI
         </Link>
+
+        {/* User + logout */}
+        {user && (
+          <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+            <span className="hidden md:block text-xs text-gray-500 max-w-[140px] truncate">
+              {user.primaryEmailAddress?.emailAddress}
+            </span>
+            <button
+              onClick={() => signOut({ redirectUrl: "/sign-in" })}
+              title="Sign out"
+              className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

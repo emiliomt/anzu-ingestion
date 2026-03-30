@@ -31,13 +31,41 @@ interface MonthRow {
   byCategory: Record<string, number>;
 }
 
+interface VendorRow {
+  vendorName: string;
+  total: number;
+  invoiceCount: number;
+}
+
 interface Summary {
   totals: { regular: number; cajaChica: number; grand: number };
   byCategory: CategoryRow[];
   byProject: ProjectRow[];
   byMonth: MonthRow[];
+  byVendor: VendorRow[];
   invoiceCount: number;
 }
+
+interface FunnelRow {
+  status: string;
+  count: number;
+}
+
+const FUNNEL_PERIODS = [
+  { value: "today", label: "Today" },
+  { value: "week",  label: "7 Days" },
+  { value: "month", label: "This Month" },
+  { value: "all",   label: "All Time" },
+];
+
+const STATUS_COLORS: Record<string, string> = {
+  received:   "#3b82f6",
+  processing: "#f59e0b",
+  extracted:  "#8b5cf6",
+  reviewed:   "#6366f1",
+  complete:   "#10b981",
+  error:      "#ef4444",
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -118,6 +146,8 @@ export default function ChartsPage() {
   const [period, setPeriod] = useState("ytd");
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [funnelPeriod, setFunnelPeriod] = useState("all");
+  const [funnelData, setFunnelData] = useState<FunnelRow[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +160,13 @@ export default function ChartsPage() {
   }, [period]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    fetch(`/api/metrics/funnel?period=${funnelPeriod}`)
+      .then((r) => r.json())
+      .then((d) => setFunnelData(d.data ?? []))
+      .catch(() => {});
+  }, [funnelPeriod]);
 
   // ── Derived chart data ────────────────────────────────────────────────────
 
@@ -170,6 +207,13 @@ export default function ChartsPage() {
     name: p.projectName.length > 22 ? p.projectName.slice(0, 22) + "…" : p.projectName,
     Amount: p.total,
     invoices: p.invoiceCount,
+  }));
+
+  // Vendor horizontal bar
+  const vendorBarData = (data?.byVendor ?? []).map((v) => ({
+    name: v.vendorName.length > 24 ? v.vendorName.slice(0, 24) + "…" : v.vendorName,
+    Amount: v.total,
+    invoices: v.invoiceCount,
   }));
 
   // Regular vs Caja Chica donut
@@ -412,6 +456,76 @@ export default function ChartsPage() {
 
         </div>
       )}
+
+      {/* ── Vendor Spend ── */}
+      {vendorBarData.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+          <h2 className="text-sm font-semibold text-gray-700 mb-1">Top Vendors by Spend</h2>
+          <p className="text-xs text-gray-400 mb-4">Up to 10 vendors with highest total spend in confirmed matches</p>
+          <ResponsiveContainer width="100%" height={Math.max(vendorBarData.length * 36, 160)}>
+            <BarChart data={vendorBarData} layout="vertical" margin={{ top: 0, right: 60, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
+              <XAxis type="number" tickFormatter={fmt} tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+              <Tooltip
+                content={<CurrencyTooltip />}
+                cursor={{ fill: "#f9fafb" }}
+              />
+              <Bar dataKey="Amount" fill="#6366f1" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* ── Invoice Processing Funnel ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">Invoice Processing Funnel</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Count of invoices at each pipeline stage</p>
+          </div>
+          <div className="flex gap-1">
+            {FUNNEL_PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setFunnelPeriod(p.value)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  funnelPeriod === p.value
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={funnelData} margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+            <XAxis dataKey="status" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip
+              formatter={(v) => [Number(v), "Invoices"]}
+              contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
+            />
+            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+              {funnelData.map((entry) => (
+                <Cell key={entry.status} fill={STATUS_COLORS[entry.status] ?? "#d1d5db"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div className="flex flex-wrap gap-2 mt-3">
+          {funnelData.filter((d) => d.count > 0).map((d) => (
+            <span key={d.status} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+              <span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLORS[d.status] ?? "#d1d5db" }} />
+              {d.status}: <strong className="text-gray-800">{d.count}</strong>
+            </span>
+          ))}
+        </div>
+      </div>
+
     </div>
   );
 }

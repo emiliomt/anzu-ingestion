@@ -181,6 +181,12 @@ async function processInvoice(
   // Load settings for this extraction run
   const settings = await getSettings();
 
+  // Load active custom fields
+  const activeCustomFields = await prisma.customField.findMany({
+    where: { isActive: true },
+    orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+  });
+
   try {
     const { result: extraction, ocrText } = await extractInvoiceWithOcr(buffer, mimeType, {
       default_country:    settings.default_country,
@@ -191,6 +197,7 @@ async function processInvoice(
       buildFewShot:       buildFewShotSection,
       fineTunedModelId:   settings.finetune_model_id,
       enabled_fields:     settings.extraction_fields,
+      customFields:       activeCustomFields,
     });
 
     // Upsert vendor
@@ -316,8 +323,19 @@ async function processInvoice(
         };
       });
 
+    // Custom fields — written when the extraction returned a value
+    const customInserts = Object.entries(extraction.customFields ?? {})
+      .filter(([, field]) => field.value !== null)
+      .map(([key, field]) => ({
+        invoiceId,
+        fieldName: key,
+        value: field.value != null ? String(field.value) : null,
+        confidence: field.confidence ?? null,
+        isUncertain: field.is_uncertain ?? false,
+      }));
+
     await prisma.extractedField.createMany({
-      data: [...coreInserts, ...extendedInserts],
+      data: [...coreInserts, ...extendedInserts, ...customInserts],
     });
 
     // Store line items

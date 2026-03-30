@@ -20,6 +20,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@aws-sdk/client-s3": "^3.744.0",
     "@aws-sdk/s3-request-presigner": "^3.744.0",
+    "@clerk/nextjs": "^5.7.5",
     "@prisma/client": "^5.22.0",
     "@vercel/functions": "^3.4.3",
     "date-fns": "^3.6.0",

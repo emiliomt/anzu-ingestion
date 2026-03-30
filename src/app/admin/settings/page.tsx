@@ -5,6 +5,7 @@ import {
   Cpu, Webhook, FileType, Info,
   Copy, Check, Zap, FileText, Image,
   Settings2, Save, Loader2, SlidersHorizontal,
+  Plus, Trash2, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { COUNTRY_CURRENCY, ALL_EXTRACTION_FIELDS } from "@/lib/app-settings";
 import type { AppSettings } from "@/lib/app-settings";
@@ -236,6 +237,18 @@ const FIELD_GROUPS: FieldGroup[] = [
 
 const ALL_FIELD_KEYS = ALL_EXTRACTION_FIELDS as unknown as string[];
 
+// ── Custom field type ─────────────────────────────────────────────────────────
+interface CustomFieldRecord {
+  id: string;
+  name: string;
+  key: string;
+  prompt: string | null;
+  fieldType: string;
+  isActive: boolean;
+  includeInExport: boolean;
+  displayOrder: number;
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const [origin] = useState(() =>
@@ -253,6 +266,73 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Custom fields state ─────────────────────────────────────────────────────
+  const [customFields, setCustomFields] = useState<CustomFieldRecord[]>([]);
+  const [newField, setNewField] = useState({ name: "", key: "", prompt: "", fieldType: "text" });
+  const [addingField, setAddingField] = useState(false);
+  const [cfSaving, setCfSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/custom-fields")
+      .then((r) => r.json())
+      .then((d) => setCustomFields(d.fields ?? []))
+      .catch(() => {});
+  }, []);
+
+  function autoKey(name: string) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  }
+
+  async function handleAddField(e: React.FormEvent) {
+    e.preventDefault();
+    setCfSaving(true);
+    try {
+      const res = await fetch("/api/custom-fields", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newField),
+      });
+      if (res.ok) {
+        const { field } = await res.json();
+        setCustomFields((prev) => [...prev, field]);
+        setNewField({ name: "", key: "", prompt: "", fieldType: "text" });
+        setAddingField(false);
+      }
+    } finally {
+      setCfSaving(false);
+    }
+  }
+
+  async function toggleFieldActive(field: CustomFieldRecord) {
+    const res = await fetch(`/api/custom-fields/${field.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: !field.isActive }),
+    });
+    if (res.ok) {
+      const { field: updated } = await res.json();
+      setCustomFields((prev) => prev.map((f) => f.id === updated.id ? updated : f));
+    }
+  }
+
+  async function toggleFieldExport(field: CustomFieldRecord) {
+    const res = await fetch(`/api/custom-fields/${field.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ includeInExport: !field.includeInExport }),
+    });
+    if (res.ok) {
+      const { field: updated } = await res.json();
+      setCustomFields((prev) => prev.map((f) => f.id === updated.id ? updated : f));
+    }
+  }
+
+  async function deleteField(id: string) {
+    if (!confirm("Delete this custom field? Existing extracted values will remain in the database.")) return;
+    await fetch(`/api/custom-fields/${id}`, { method: "DELETE" });
+    setCustomFields((prev) => prev.filter((f) => f.id !== id));
+  }
 
   // Fetch current settings on mount
   useEffect(() => {
@@ -690,6 +770,128 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          </Section>
+
+          {/* ── Custom Extraction Fields ── */}
+          <Section
+            icon={<SlidersHorizontal className="w-4 h-4" />}
+            title="Custom Extraction Fields"
+            description="User-defined fields the AI extracts from every invoice. Active fields appear in CSV and ERP exports."
+          >
+            {customFields.length === 0 && !addingField ? (
+              <p className="text-xs text-gray-400 py-2">No custom fields yet. Add one to extract additional data from invoices.</p>
+            ) : (
+              <div className="space-y-2 mb-3">
+                {customFields.map((cf) => (
+                  <div key={cf.id} className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-800">{cf.name}</span>
+                        <span className="text-[10px] font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{cf.key}</span>
+                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{cf.fieldType}</span>
+                      </div>
+                      {cf.prompt && (
+                        <p className="text-[11px] text-gray-400 mt-0.5 truncate max-w-sm">{cf.prompt}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => toggleFieldActive(cf)}
+                        title={cf.isActive ? "Disable" : "Enable"}
+                        className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${cf.isActive ? "bg-green-50 text-green-700 hover:bg-green-100" : "bg-gray-100 text-gray-400 hover:bg-gray-200"}`}
+                      >
+                        {cf.isActive ? <ToggleRight className="w-3.5 h-3.5 inline" /> : <ToggleLeft className="w-3.5 h-3.5 inline" />}
+                        {" "}{cf.isActive ? "On" : "Off"}
+                      </button>
+                      <button
+                        onClick={() => toggleFieldExport(cf)}
+                        title={cf.includeInExport ? "Remove from export" : "Include in export"}
+                        className={`text-[10px] px-2 py-1 rounded-md font-medium transition-colors ${cf.includeInExport ? "bg-blue-50 text-blue-600 hover:bg-blue-100" : "bg-gray-100 text-gray-400 hover:bg-gray-200"}`}
+                      >
+                        CSV {cf.includeInExport ? "✓" : "✗"}
+                      </button>
+                      <button
+                        onClick={() => deleteField(cf.id)}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {addingField ? (
+              <form onSubmit={handleAddField} className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-medium text-gray-600 block mb-1">Display Name *</label>
+                    <input
+                      className={inputClass}
+                      placeholder="Cost Center"
+                      value={newField.name}
+                      onChange={(e) => setNewField((p) => ({ ...p, name: e.target.value, key: autoKey(e.target.value) }))}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-gray-600 block mb-1">AI Key *</label>
+                    <input
+                      className={inputClass}
+                      placeholder="cost_center"
+                      value={newField.key}
+                      onChange={(e) => setNewField((p) => ({ ...p, key: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-600 block mb-1">AI Extraction Prompt</label>
+                  <input
+                    className={inputClass}
+                    placeholder='Extract the cost center code, e.g. "CC-201"'
+                    value={newField.prompt}
+                    onChange={(e) => setNewField((p) => ({ ...p, prompt: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-600 block mb-1">Field Type</label>
+                  <select
+                    className={selectClass}
+                    value={newField.fieldType}
+                    onChange={(e) => setNewField((p) => ({ ...p, fieldType: e.target.value }))}
+                  >
+                    <option value="text">Text</option>
+                    <option value="number">Number</option>
+                    <option value="date">Date (YYYY-MM-DD)</option>
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="submit"
+                    disabled={cfSaving}
+                    className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium"
+                  >
+                    {cfSaving ? "Saving…" : "Add Field"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddingField(false)}
+                    className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => setAddingField(true)}
+                className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add custom field
+              </button>
+            )}
           </Section>
 
           {/* ── Webhooks & Endpoints ── */}

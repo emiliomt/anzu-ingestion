@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { InvoiceTable } from "@/components/InvoiceTable";
 import { InvoiceDetail } from "@/components/InvoiceDetail";
 import { MetricsPanel } from "@/components/MetricsPanel";
+import { UnsortedQueueWidget } from "@/components/UnsortedQueueWidget";
 
 export default function AdminDashboard() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
@@ -23,6 +24,7 @@ export default function AdminDashboard() {
       {/* Metrics */}
       <div className="flex-shrink-0">
         <MetricsPanel />
+        <UnsortedQueueWidget />
       </div>
 
       {/* Content: table + detail panel */}

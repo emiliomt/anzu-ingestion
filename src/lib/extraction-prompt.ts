@@ -111,3 +111,34 @@ Rules:
 - Set category: null ONLY when description is completely blank.
 - When the description is ambiguous, choose the most likely category and
   lower the confidence score for that line item.`;
+
+export interface CustomFieldDef {
+  key: string;
+  name: string;
+  prompt?: string | null;
+  fieldType: string;
+}
+
+/**
+ * Build the custom fields section appended to the extraction system prompt.
+ * Each custom field is listed with its key, display name, and optional extraction instruction.
+ */
+export function buildCustomFieldsSection(fields: CustomFieldDef[]): string {
+  if (fields.length === 0) return "";
+
+  const lines = fields.map((f) => {
+    const instruction = f.prompt
+      ? f.prompt
+      : `Extract the ${f.name} value if present in the document.`;
+    return `  ${f.key} (${f.fieldType}): ${instruction}`;
+  });
+
+  return `
+
+══ CUSTOM FIELDS ════════════════════════════════════════════════════════════════
+In addition to the standard fields above, extract the following custom fields.
+Include them in the JSON output alongside other fields using the same
+{ value, confidence, is_uncertain } structure. Return null value if not found.
+
+${lines.join("\n")}`;
+}
