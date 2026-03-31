@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 // ── Anzu internal field keys exposed for ERP column mapping ────────────────────
 
-export const ANZU_FIELD_LABELS: Record<string, string> = {
+const ANZU_FIELD_LABELS: Record<string, string> = {
   invoice_number:   "Invoice Number",
   vendor_name:      "Vendor Name",
   vendor_nit:       "Vendor NIT / Tax ID",
