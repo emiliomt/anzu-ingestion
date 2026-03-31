@@ -224,3 +224,17 @@ model InvoiceMatch {
 
   @@map("invoice_matches")
 }
+
+// ── ERP Export Profiles ───────────────────────────────────────────────────────
+
+model ErpExportProfile {
+  id            String   @id @default(uuid())
+  name          String
+  erpType       String   @default("custom") // "custom" only; "sinco" is a system preset
+  columnMapping String   // JSON: [{ header: string, anzuField: string | null }]
+  outputFormat  String   @default("xlsx")   // "xlsx" | "csv"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("erp_export_profiles")
+}

@@ -5,8 +5,11 @@ import {
   Cpu, Webhook, FileType, Info,
   Copy, Check, Zap, FileText, Image,
   Settings2, Save, Loader2, SlidersHorizontal,
-  Plus, Trash2, ToggleLeft, ToggleRight,
+  Plus, Trash2, ToggleLeft, ToggleRight, FileOutput,
 } from "lucide-react";
+import {
+  ErpExportSettingsSection,
+} from "@/components/ErpExportSettingsSection";
 import { COUNTRY_CURRENCY, ALL_EXTRACTION_FIELDS } from "@/lib/app-settings";
 import type { AppSettings } from "@/lib/app-settings";
 
@@ -892,6 +895,15 @@ export default function SettingsPage() {
                 <Plus className="w-3.5 h-3.5" /> Add custom field
               </button>
             )}
+          </Section>
+
+          {/* ── ERP Export Settings ── */}
+          <Section
+            icon={<FileOutput className="w-4 h-4" />}
+            title="ERP Export Settings"
+            description="Configure how processed invoices are exported to your ERP or accounting system."
+          >
+            <ErpExportSettingsSection />
           </Section>
 
           {/* ── Webhooks & Endpoints ── */}

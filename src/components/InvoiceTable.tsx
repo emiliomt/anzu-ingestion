@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight, Trash2, FileOutput, Loader2, X } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceListItem } from "@/types/invoice";
 import { format } from "date-fns";
@@ -33,6 +33,13 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // ERP export
+  const [showErpModal, setShowErpModal] = useState(false);
+  const [erpProfiles, setErpProfiles] = useState<{ id: string; name: string }[]>([]);
+  const [selectedErpProfileId, setSelectedErpProfileId] = useState<string>("sinco");
+  const [erpExporting, setErpExporting] = useState(false);
+  const [erpToast, setErpToast] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async (page = 1) => {
     setLoading(true);
@@ -102,6 +109,61 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
       console.error(err);
     } finally {
       setBulkDeleting(false);
+    }
+  };
+
+  const openErpModal = async () => {
+    try {
+      const res = await fetch("/api/erp-profiles");
+      const data = await res.json() as { profiles: { id: string; name: string }[] };
+      setErpProfiles(data.profiles ?? []);
+    } catch { /* ignore */ }
+    setShowErpModal(true);
+  };
+
+  const handleErpExport = async () => {
+    setErpExporting(true);
+    try {
+      const res = await fetch("/api/export/erp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceIds: Array.from(checkedIds),
+          profileId: selectedErpProfileId,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        alert(err.error ?? "Export failed");
+        return;
+      }
+
+      // Trigger browser download
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const fileName = match?.[1] ?? "erp_export.xlsx";
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      const profileLabel =
+        selectedErpProfileId === "sinco"
+          ? "SINCO ERP"
+          : (erpProfiles.find((p) => p.id === selectedErpProfileId)?.name ?? "Custom");
+
+      setShowErpModal(false);
+      setErpToast(`Exported ${checkedIds.size} invoice${checkedIds.size !== 1 ? "s" : ""} to ${profileLabel}`);
+      setTimeout(() => setErpToast(null), 4000);
+    } catch {
+      alert("Network error during export");
+    } finally {
+      setErpExporting(false);
     }
   };
 
@@ -180,12 +242,19 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
           </span>
         </div>
 
-        {/* Bulk delete bar */}
+        {/* Bulk actions bar */}
         {someChecked && (
-          <div className="flex items-center gap-2 px-1 py-1 bg-red-50 border border-red-100 rounded-lg">
-            <span className="text-xs text-red-700 font-medium flex-1">
+          <div className="flex items-center gap-2 px-1 py-1 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <span className="text-xs text-indigo-700 font-medium flex-1">
               {checkedIds.size} selected
             </span>
+            <button
+              onClick={openErpModal}
+              className="flex items-center gap-1.5 text-xs px-3 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              <FileOutput className="w-3 h-3" />
+              Export to ERP
+            </button>
             {!confirmBulkDelete ? (
               <button
                 onClick={() => setConfirmBulkDelete(true)}
@@ -402,6 +471,102 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ERP Export Modal */}
+      {showErpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-sm mx-4 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileOutput className="w-4 h-4 text-indigo-600" />
+                <span className="text-sm font-semibold text-gray-800">Export to ERP</span>
+              </div>
+              <button
+                onClick={() => setShowErpModal(false)}
+                className="p-1 hover:bg-gray-100 rounded text-gray-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Exporting <strong>{checkedIds.size}</strong> invoice{checkedIds.size !== 1 ? "s" : ""}.
+              Select the ERP format:
+            </p>
+
+            <div className="space-y-2">
+              {/* SINCO preset */}
+              <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50">
+                <input
+                  type="radio"
+                  name="erpProfile"
+                  value="sinco"
+                  checked={selectedErpProfileId === "sinco"}
+                  onChange={() => setSelectedErpProfileId("sinco")}
+                  className="mt-0.5 text-indigo-600"
+                />
+                <div>
+                  <div className="text-xs font-semibold text-gray-800">SINCO ERP</div>
+                  <div className="text-[11px] text-gray-400">Colombia — CONTABILIDAD sheet · 15 columns</div>
+                </div>
+              </label>
+
+              {/* Custom profiles */}
+              {erpProfiles.map((p) => (
+                <label
+                  key={p.id}
+                  className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50"
+                >
+                  <input
+                    type="radio"
+                    name="erpProfile"
+                    value={p.id}
+                    checked={selectedErpProfileId === p.id}
+                    onChange={() => setSelectedErpProfileId(p.id)}
+                    className="mt-0.5 text-indigo-600"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-gray-800">{p.name}</div>
+                    <div className="text-[11px] text-gray-400">Custom profile</div>
+                  </div>
+                </label>
+              ))}
+
+              {erpProfiles.length === 0 && (
+                <p className="text-xs text-gray-400 px-1">
+                  No custom profiles yet. Configure them in Settings → ERP Export Settings.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleErpExport}
+                disabled={erpExporting}
+                className="flex-1 flex items-center justify-center gap-2 text-xs px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+              >
+                {erpExporting
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Exporting…</>
+                  : <><FileOutput className="w-3.5 h-3.5" /> Download File</>}
+              </button>
+              <button
+                onClick={() => setShowErpModal(false)}
+                className="text-xs px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {erpToast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white text-xs px-4 py-2.5 rounded-full shadow-lg">
+          <FileOutput className="w-3.5 h-3.5 text-indigo-300" />
+          {erpToast}
         </div>
       )}
     </div>
