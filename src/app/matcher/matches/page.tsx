@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Download, Send, Upload, Loader2, Check,
-  AlertCircle, FileSpreadsheet, Globe, Key,
+  AlertCircle, FileSpreadsheet, Globe, Key, FileOutput,
 } from "lucide-react";
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
@@ -123,6 +123,60 @@ export default function MatchesPage() {
   const [uploadSending, setUploadSending] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ ok: boolean; message: string } | null>(null);
 
+  // ── ERP format download state ──────────────────────────────────────────────
+  const [erpProfiles, setErpProfiles] = useState<{ id: string; name: string; outputFormat: string }[]>([]);
+  const [selectedErpProfile, setSelectedErpProfile] = useState<string>("sinco");
+  const [erpDownloading, setErpDownloading] = useState(false);
+  const [erpResult, setErpResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/erp-profiles")
+      .then((r) => r.json())
+      .then((d: { profiles?: { id: string; name: string; outputFormat: string }[] }) => {
+        setErpProfiles(d.profiles ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function downloadErpFormat() {
+    setErpDownloading(true);
+    setErpResult(null);
+    try {
+      const res = await fetch("/api/export/erp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filter: "confirmed_matches", profileId: selectedErpProfile }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        setErpResult({ ok: false, message: err.error ?? "Export failed" });
+        return;
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const fileName = match?.[1] ?? "erp_export.xlsx";
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      const label = selectedErpProfile === "sinco"
+        ? "SINCO ERP"
+        : (erpProfiles.find((p) => p.id === selectedErpProfile)?.name ?? "Custom");
+      setErpResult({ ok: true, message: `Downloaded as ${label} format — ${fileName}` });
+    } catch (err) {
+      setErpResult({ ok: false, message: err instanceof Error ? err.message : "Network error" });
+    } finally {
+      setErpDownloading(false);
+    }
+  }
+
   // ── Send JSON to ERP ───────────────────────────────────────────────────────
   async function sendToErp() {
     if (!apiConfig.url) return;
@@ -222,7 +276,55 @@ export default function MatchesPage() {
           </div>
         </Section>
 
-        {/* ── 2. Send via API (JSON) ── */}
+        {/* ── 2. Download in ERP Format ── */}
+        <Section
+          icon={<FileOutput className="w-4 h-4" />}
+          title="Download in ERP Format"
+          description="Export confirmed matches using your configured ERP column mapping"
+        >
+          <p className="text-xs text-gray-500 mb-4">
+            Uses the ERP profiles configured in{" "}
+            <span className="font-medium text-gray-700">Settings → ERP Export Settings</span>.
+            Exports all confirmed matches in the selected format.
+          </p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">ERP Format</label>
+              <select
+                className={selectCls}
+                value={selectedErpProfile}
+                onChange={(e) => { setSelectedErpProfile(e.target.value); setErpResult(null); }}
+              >
+                <option value="sinco">SINCO ERP (Colombia — CONTABILIDAD · 15 columns)</option>
+                {erpProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.outputFormat.toUpperCase()})
+                  </option>
+                ))}
+              </select>
+              {erpProfiles.length === 0 && (
+                <p className="text-[11px] text-gray-400 mt-1">
+                  No custom profiles yet — create them in Settings → ERP Export Settings.
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={downloadErpFormat}
+              disabled={erpDownloading}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              {erpDownloading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>
+                : <><Download className="w-4 h-4" /> Download Confirmed Matches</>}
+            </button>
+          </div>
+
+          {erpResult && <ResultBanner result={erpResult} />}
+        </Section>
+
+        {/* ── 4. Send via API (JSON) ── */}
         <Section
           icon={<Send className="w-4 h-4" />}
           title="Send to ERP via API"
@@ -249,7 +351,7 @@ export default function MatchesPage() {
           {apiResult && <ResultBanner result={apiResult} />}
         </Section>
 
-        {/* ── 3. Upload Excel to ERP ── */}
+        {/* ── 5. Upload Excel to ERP ── */}
         <Section
           icon={<Upload className="w-4 h-4" />}
           title="Upload to ERP"

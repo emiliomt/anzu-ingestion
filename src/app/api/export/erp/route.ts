@@ -147,27 +147,48 @@ function fileTimestamp(): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
-      invoiceIds: string[];
+      invoiceIds?: string[];
+      filter?: "confirmed_matches";
       profileId: string; // "sinco" | uuid
     };
 
-    if (!Array.isArray(body.invoiceIds) || body.invoiceIds.length === 0) {
-      return NextResponse.json({ error: "invoiceIds must be a non-empty array" }, { status: 400 });
+    // Resolve invoice list — either explicit IDs or all confirmed matches
+    let invoices;
+    if (body.filter === "confirmed_matches") {
+      const matches = await prisma.invoiceMatch.findMany({
+        where: { isConfirmed: true },
+        select: { invoiceId: true },
+      });
+      const ids = Array.from(new Set(matches.map((m) => m.invoiceId)));
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "No confirmed matches found" }, { status: 404 });
+      }
+      invoices = await prisma.invoice.findMany({
+        where: { id: { in: ids } },
+        include: {
+          extractedData: { select: { fieldName: true, value: true } },
+          lineItems: {
+            select: { description: true, lineTotal: true, quantity: true, unitPrice: true },
+          },
+        },
+      });
+    } else {
+      if (!Array.isArray(body.invoiceIds) || body.invoiceIds.length === 0) {
+        return NextResponse.json({ error: "invoiceIds must be a non-empty array, or set filter: 'confirmed_matches'" }, { status: 400 });
+      }
+      invoices = await prisma.invoice.findMany({
+        where: { id: { in: body.invoiceIds } },
+        include: {
+          extractedData: { select: { fieldName: true, value: true } },
+          lineItems: {
+            select: { description: true, lineTotal: true, quantity: true, unitPrice: true },
+          },
+        },
+      });
     }
 
-    // Load invoices with extracted data and line items
-    const invoices = await prisma.invoice.findMany({
-      where: { id: { in: body.invoiceIds } },
-      include: {
-        extractedData: { select: { fieldName: true, value: true } },
-        lineItems: {
-          select: { description: true, lineTotal: true, quantity: true, unitPrice: true },
-        },
-      },
-    });
-
     if (invoices.length === 0) {
-      return NextResponse.json({ error: "No invoices found for given IDs" }, { status: 404 });
+      return NextResponse.json({ error: "No invoices found" }, { status: 404 });
     }
 
     // ── SINCO preset ──────────────────────────────────────────────────────────
