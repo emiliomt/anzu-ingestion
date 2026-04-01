@@ -84,13 +84,13 @@ function PortalHeader() {
                 </>
               ) : (
                 <>
-                  <SignInButton mode="redirect" redirectUrl="/portal/dashboard">
+                  <SignInButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                     <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">
                       <LogIn className="w-4 h-4" />
                       Sign In
                     </button>
                   </SignInButton>
-                  <SignUpButton mode="redirect" redirectUrl="/portal/dashboard">
+                  <SignUpButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                     <button
                       className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white"
                       style={{ background: "linear-gradient(135deg, #F97316, #EA580C)", boxShadow: "0 4px 16px rgba(249,115,22,0.35)" }}
@@ -154,12 +154,12 @@ function PortalHeader() {
               style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}>
               {isLoaded && !isSignedIn && (
                 <>
-                  <SignInButton mode="redirect" redirectUrl="/portal/dashboard">
+                  <SignInButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                     <button className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200">
                       <LogIn className="w-4 h-4" /> Sign In
                     </button>
                   </SignInButton>
-                  <SignUpButton mode="redirect" redirectUrl="/portal/dashboard">
+                  <SignUpButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                     <button className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl text-sm font-bold text-white"
                       style={{ background: "linear-gradient(135deg, #F97316, #EA580C)", boxShadow: "0 8px 24px rgba(249,115,22,0.35)" }}>
                       <UserPlus className="w-4 h-4" /> Create Account
@@ -229,7 +229,7 @@ export default function ProviderPortal() {
           {/* CTA for non-signed-in users */}
           {isLoaded && !isSignedIn && (
             <div className="flex items-center justify-center gap-3 mb-8 anzu-fade-up" style={{ animationDelay: "260ms" }}>
-              <SignUpButton mode="redirect" redirectUrl="/portal/dashboard">
+              <SignUpButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                 <button
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white"
                   style={{ background: "linear-gradient(135deg, #F97316, #EA580C)", boxShadow: "0 4px 20px rgba(249,115,22,0.4)" }}
@@ -238,7 +238,7 @@ export default function ProviderPortal() {
                   Create Provider Account
                 </button>
               </SignUpButton>
-              <SignInButton mode="redirect" redirectUrl="/portal/dashboard">
+              <SignInButton mode="redirect" forceRedirectUrl="/portal/dashboard">
                 <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-colors">
                   <LogIn className="w-4 h-4" />
                   Sign In
