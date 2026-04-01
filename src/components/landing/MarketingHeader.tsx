@@ -39,17 +39,17 @@ const RESOURCE_ITEMS = [
 ].map((item, i) => ({ ...item, icon: RESOURCE_ICONS[i] }));
 
 /* ── App launch items ── */
-const APP_ICONS = [LayoutDashboard, ShieldCheck, GitMerge, BookOpen, Upload];
+const APP_ICONS = [Upload, LayoutDashboard, ShieldCheck, GitMerge, BookOpen];
 const APP_ITEMS = [
-  { label: "Invoice Ingestor",  desc: "Review & extract invoices",     href: "/admin",          color: "#4F46E5" },
-  { label: "Invoice Security",  desc: "Buyer & vendor verification",   href: "/security",       color: "#DC2626" },
-  { label: "Invoice Matcher",   desc: "Match invoices to POs",          href: "/matcher",        color: "#10B981" },
-  { label: "Pre-Accounting",    desc: "P&L and expense classification", href: "/preaccounting",  color: "#EA580C" },
-  { label: "Submit an Invoice", desc: "Vendor portal",                  href: "/portal",         color: "#2563EB" },
+  { label: "Vendor Portal",     desc: "Submit invoices & track payment", href: "/portal",       color: "#2563EB" },
+  { label: "Invoice Ingestor",  desc: "Review & extract invoices",       href: "/admin",        color: "#4F46E5" },
+  { label: "Invoice Security",  desc: "Buyer & vendor verification",     href: "/security",     color: "#DC2626" },
+  { label: "Invoice Matcher",   desc: "Match invoices to POs",           href: "/matcher",      color: "#10B981" },
+  { label: "Pre-Accounting",    desc: "P&L and expense classification",  href: "/preaccounting",color: "#EA580C" },
 ].map((item, i) => ({ ...item, icon: APP_ICONS[i] }));
 
-const ADMIN_APP_ITEMS = APP_ITEMS.slice(0, 4);
-const PORTAL_APP_ITEM = APP_ITEMS[4];
+const ADMIN_APP_ITEMS = APP_ITEMS.slice(1, 5);   // admin-only apps (no portal)
+const PORTAL_APP_ITEM = APP_ITEMS[0];             // vendor portal — shown separately
 
 /* ── Desktop dropdown ── */
 function DesktopDropdown({

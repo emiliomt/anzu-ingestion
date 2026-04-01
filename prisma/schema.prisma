@@ -37,6 +37,7 @@ model Invoice {
   submittedName String?         // provider name if given
   submittedAt  DateTime         @default(now())
   processedAt  DateTime?
+  paidAt       DateTime?  // set by admin when payment is confirmed
   reviewedBy   String?
   flags        String           @default("[]")  // JSON array of flag strings
   isDuplicate  Boolean          @default(false)

@@ -5,8 +5,12 @@ const isPublic = createRouteMatcher([
   "/pricing(.*)",
   "/status(.*)",
   "/sign-in(.*)",
+  "/portal",            // vendor portal landing (unauthenticated upload allowed)
+  "/portal/sign-in(.*)",
+  "/portal/sign-up(.*)",
   "/api/webhooks(.*)",
   "/api/status(.*)",
+  "/api/upload",        // unauthenticated upload (email/name provided in form)
   "/api/health",
 ]);
 
