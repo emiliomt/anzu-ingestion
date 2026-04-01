@@ -30,7 +30,7 @@ export async function GET() {
       _count: { id: true },
     }),
     prisma.invoice.findMany({
-      select: { flags: true, isDuplicate: true },
+      select: { flags: true, isDuplicate: true, status: true },
     }),
     prisma.extractedField.aggregate({
       _avg: { confidence: true },
@@ -74,6 +74,7 @@ export async function GET() {
 
   // Count flagged invoices among those in "extracted" status
   const extractedFlaggedCount = allFlags.filter((inv) => {
+    if (inv.status !== "extracted") return false;
     const flags = safeJsonParse<string[]>(inv.flags, []);
     return flags.length > 0;
   }).length;

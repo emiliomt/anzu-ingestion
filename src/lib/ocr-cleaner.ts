@@ -11,7 +11,6 @@ function fixOcrErrors(text: string): string {
   // Context-aware S ↔ 5: when directly adjacent to a digit, treat as 5
   text = text.replace(/([0-9])S([0-9])/g, "$15$2");  // between digits
   text = text.replace(/([0-9])S(?=\s|$|[^\w])/g, "$15"); // trailing after digit
-  text = text.replace(/(?:^|\s)S([0-9])/g, (m, d) => m.replace("S", "5") + d.slice(0, 0)); // leading before digit — handled below
   text = text.replace(/\bS([0-9])/g, "5$1"); // word-boundary S before digit
 
   // Pipe / uppercase-I / lowercase-l in purely numeric context → 1

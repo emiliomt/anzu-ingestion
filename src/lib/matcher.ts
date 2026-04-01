@@ -144,6 +144,18 @@ Respond ONLY with a JSON object — no markdown, no explanation outside JSON:
 
   const text = response.choices[0]?.message?.content?.trim() ?? "{}";
 
-  const parsed = JSON.parse(text) as MatchResult;
-  return parsed;
+  const parsed = JSON.parse(text) as Partial<MatchResult>;
+
+  if (!parsed.matchType || parsed.confidence === undefined || !parsed.matchLabel) {
+    console.warn("[Matcher] Incomplete response from model:", text.slice(0, 200));
+    return {
+      matchType: "unmatched",
+      matchId: null,
+      matchLabel: "No match found",
+      confidence: 0,
+      reasoning: "Model returned an incomplete response.",
+    };
+  }
+
+  return parsed as MatchResult;
 }

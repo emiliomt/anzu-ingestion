@@ -240,11 +240,11 @@ async function processInvoice(
       const invoiceNum = typeof invoiceNumberValue === "string" ? invoiceNumberValue : null;
       const vendorName = typeof vendorNameValue === "string" ? vendorNameValue : null;
 
-      if (invoiceNum || vendorName) {
+      if (invoiceNum) {
         const existingField = await prisma.extractedField.findFirst({
           where: {
             fieldName: "invoice_number",
-            value: invoiceNum ?? undefined,
+            value: invoiceNum,
             invoice: {
               id: { not: invoiceId },
               ...(vendorId ? { vendorId } : {}),
