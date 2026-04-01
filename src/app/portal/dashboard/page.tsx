@@ -245,7 +245,7 @@ export default function ProviderDashboard() {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={inv.status} paidAt={inv.paidAt} />
                           {inv.flags.includes("security_failed") && (
-                            <ShieldAlert className="w-3.5 h-3.5 text-red-500 shrink-0" title="Security check failed" />
+                            <ShieldAlert className="w-3.5 h-3.5 text-red-500 shrink-0" aria-label="Security check failed" />
                           )}
                         </div>
                       </td>
