@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionContext, unauthorized, forbidden } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/training/stats — correction statistics for the training dashboard */
+/** GET /api/training/stats — correction statistics for the training dashboard (ADMIN only) */
 export async function GET() {
+  const ctx = await getSessionContext();
+  if (!ctx) return unauthorized();
+  if (ctx.role !== "ADMIN") return forbidden("AI training data is restricted to administrators");
   const [totalCorrections, correctionsByField, invoicesWithOcr, finetune] =
     await Promise.all([
       prisma.correctionLog.count(),

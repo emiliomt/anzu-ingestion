@@ -26,20 +26,26 @@ const OTHER_APPS = [
 interface AdminSidebarProps {
   mobileOpen: boolean;
   onMobileClose: () => void;
+  /** "client" hides AI/training-only nav items */
+  portalMode?: "admin" | "client";
 }
 
-export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
+export function AdminSidebar({ mobileOpen, onMobileClose, portalMode = "admin" }: AdminSidebarProps) {
   const pathname = usePathname();
 
   const isActive = (href: string, exact: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
+
+  const visibleNavItems = portalMode === "client"
+    ? NAV_ITEMS.filter(({ href }) => !href.includes("/training") && !href.includes("/fine-tune"))
+    : NAV_ITEMS;
 
   function SidebarContent() {
     return (
       <>
         {/* Primary nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
+          {visibleNavItems.map(({ href, label, icon: Icon, exact }) => {
             const active = isActive(href, exact);
             return (
               <Link
@@ -140,7 +146,7 @@ export function AdminSidebar({ mobileOpen, onMobileClose }: AdminSidebarProps) {
         <div className="flex-1 flex flex-col min-h-0">
           {/* Icon-only at md */}
           <div className="flex-1 flex flex-col min-h-0 xl:hidden px-3 py-4 space-y-0.5 overflow-y-auto">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
+            {visibleNavItems.map(({ href, label, icon: Icon, exact }) => {
               const active = isActive(href, exact);
               return (
                 <Link

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
+import { upsertGlobalSetting } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -25,11 +26,11 @@ export async function POST(_request: NextRequest) {
   }
 
   // Check for an already-running job
-  const existingJob = await prisma.setting.findUnique({
-    where: { key: "finetune_job_id" },
+  const existingJob = await prisma.setting.findFirst({
+    where: { key: "finetune_job_id", organizationId: null },
   });
-  const existingStatus = await prisma.setting.findUnique({
-    where: { key: "finetune_status" },
+  const existingStatus = await prisma.setting.findFirst({
+    where: { key: "finetune_status", organizationId: null },
   });
   if (existingJob && existingStatus?.value === "running") {
     return NextResponse.json(
@@ -133,18 +134,10 @@ Return ONLY valid JSON — no preamble, no markdown fences, no explanation.\n\nI
 
     // Persist job state in settings
     await Promise.all([
-      prisma.setting.upsert({
-        where: { key: "finetune_job_id" },
-        update: { value: job.id },
-        create: { key: "finetune_job_id", value: job.id },
-      }),
-      prisma.setting.upsert({
-        where: { key: "finetune_status" },
-        update: { value: "running" },
-        create: { key: "finetune_status", value: "running" },
-      }),
+      upsertGlobalSetting("finetune_job_id", job.id),
+      upsertGlobalSetting("finetune_status", "running"),
       // Clear any previously trained model so we don't use it during training
-      prisma.setting.deleteMany({ where: { key: "finetune_model_id" } }),
+      prisma.setting.deleteMany({ where: { key: "finetune_model_id", organizationId: null } }),
     ]);
 
     return NextResponse.json({

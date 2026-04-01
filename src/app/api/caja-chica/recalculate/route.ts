@@ -7,7 +7,7 @@ const THRESHOLD_KEY = "petty_cash_threshold";
 const DEFAULT_THRESHOLD = 400000;
 
 export async function POST() {
-  const setting = await prisma.setting.findUnique({ where: { key: THRESHOLD_KEY } });
+  const setting = await prisma.setting.findFirst({ where: { key: THRESHOLD_KEY, organizationId: null } });
   const threshold = setting ? Number(setting.value) : DEFAULT_THRESHOLD;
 
   // Get all processed invoices with their total extracted field

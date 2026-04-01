@@ -1,5 +1,14 @@
 // AnzuIngestion — Prisma schema
 // Default: SQLite for local dev. Switch provider to "postgresql" for production.
+//
+// MULTI-TENANCY ARCHITECTURE
+// ─────────────────────────
+// Organizations are the top-level tenant. Every CLIENT user belongs to one Organization.
+// All Invoice, Project, PurchaseOrder, CajaChica, Vendor, CustomField, and
+// ErpExportProfile records carry an optional `organizationId` for tenant isolation.
+// Application-layer guards enforce that CLIENT users only see their own org's data.
+// Providers connect to multiple Organizations via ProviderOrganizationConnection.
+// Admins can see across all tenants.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,17 +19,115 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Multi-Tenancy: Core Models ────────────────────────────────────────────────
+
+// One Organization per CLIENT tenant (mid-market company using Anzu).
+// Holds subscription plan and acts as the tenant boundary for all data.
+model Organization {
+  id        String   @id @default(uuid())
+  slug      String   @unique   // URL-safe identifier e.g. "constructora-bogota"
+  name      String             // Full legal name e.g. "Constructora Bogotá S.A.S."
+  taxId     String?            // NIT / RFC / RUT of the company
+  country   String   @default("CO")  // ISO-3166 alpha-2 country code
+  plan      String   @default("Starter") // Starter | Growth | Enterprise
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users       UserProfile[]
+  invoices    Invoice[]
+  projects    Project[]
+  purchaseOrders PurchaseOrder[]
+  cajaChica   CajaChica[]
+  vendors     Vendor[]
+  customFields CustomField[]
+  erpProfiles  ErpExportProfile[]
+  settings    Setting[]
+  providerConnections ProviderOrganizationConnection[]
+  auditLogs   AuditLog[]
+
+  @@map("organizations")
+}
+
+// Links a Clerk user to their role and (for CLIENTs) their Organization.
+// Created when a user completes onboarding via POST /api/auth/setup-profile.
+// Role is ALSO stored in Clerk publicMetadata.role for middleware-level checks.
+model UserProfile {
+  id            String   @id @default(uuid())
+  clerkUserId   String   @unique  // Clerk user ID (sub claim)
+  role          String            // ADMIN | CLIENT | PROVIDER
+  organizationId String?          // null for ADMIN and PROVIDER (providers use connections)
+  organization  Organization? @relation(fields: [organizationId], references: [id])
+  firstName     String?
+  lastName      String?
+  email         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Provider connections (if role=PROVIDER)
+  providerConnections ProviderOrganizationConnection[]
+
+  @@map("user_profiles")
+}
+
+// Many-to-many: one PROVIDER can be connected to multiple Organizations,
+// and one Organization can have many Providers.
+// Lifecycle: CLIENT invites Provider → status=pending → Provider accepts → status=accepted
+model ProviderOrganizationConnection {
+  id               String   @id @default(uuid())
+  providerProfileId String           // FK → UserProfile (role=PROVIDER)
+  providerProfile  UserProfile @relation(fields: [providerProfileId], references: [id])
+  organizationId   String           // FK → Organization
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  status           String   @default("pending") // pending | accepted | rejected
+  invitedAt        DateTime @default(now())
+  acceptedAt       DateTime?
+  invitedByClerkUserId String?  // Clerk userId of the CLIENT who sent the invite
+
+  @@unique([providerProfileId, organizationId])  // one connection per pair
+  @@map("provider_org_connections")
+}
+
+// Immutable audit trail for every sensitive action (invoice CRUD, role changes,
+// ERP exports, connection changes). Written by withGuard() and explicit log calls.
+model AuditLog {
+  id              String   @id @default(uuid())
+  actorClerkUserId String           // who performed the action
+  actorRole       String            // their role at the time (ADMIN|CLIENT|PROVIDER)
+  action          String            // e.g. "invoice.create", "invoice.delete", "user.role_assign"
+  resourceType    String            // e.g. "Invoice", "Organization", "UserProfile"
+  resourceId      String?           // ID of the affected record
+  organizationId  String?           // tenant context (null for cross-org admin actions)
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  metadata        String?           // JSON string with extra context (IP, changes, etc.)
+  ipAddress       String?
+  createdAt       DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([actorClerkUserId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ── Existing Models (with organizationId added for tenant isolation) ──────────
+
 model Vendor {
   id             String          @id @default(uuid())
   name           String
   email          String?
   phone          String?
   address        String?
+  // Tenant isolation: Vendors are scoped per org so CLIENT users only see their own vendors
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   invoices       Invoice[]
   purchaseOrders PurchaseOrder[]
 
+  @@index([organizationId])
   @@map("vendors")
 }
 
@@ -33,11 +140,11 @@ model Invoice {
   fileName     String
   mimeType     String
   fileSize     Int?
-  submittedBy  String?          // email address or phone number
+  submittedBy  String?          // email address or phone number of the uploader
   submittedName String?         // provider name if given
   submittedAt  DateTime         @default(now())
   processedAt  DateTime?
-  paidAt       DateTime?  // set by admin when payment is confirmed
+  paidAt       DateTime?        // set by admin when payment is confirmed
   reviewedBy   String?
   flags        String           @default("[]")  // JSON array of flag strings
   isDuplicate  Boolean          @default(false)
@@ -46,12 +153,18 @@ model Invoice {
   updatedAt    DateTime         @default(now()) @updatedAt
 
   // ── Human Corrections & Fine-Tuning ─────────────────────────────────────────
-  // correctedData stored as JSON string for SQLite compat; swap to Json? on PostgreSQL-only
   correctedData    String?      // serialised JSON of the corrected extraction payload
   fineTuneStatus   String       @default("PENDING") // PENDING | READY | UPLOADED | ERROR
   fineTuneJobId    String?      // fine-tune job id once submitted to AI provider
   correctedBy      String?      // user email or id who made the correction
   correctionNotes  String?      // free-text rationale for the correction
+
+  // ── Tenant isolation ──────────────────────────────────────────────────────
+  // Set to the Organization.id of the CLIENT the invoice belongs to.
+  // For provider uploads: set to the organization the provider chose at upload time.
+  // Admins can see invoices across all organizations (no filter applied).
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
 
   vendorId     String?
   vendor       Vendor?          @relation(fields: [vendorId], references: [id])
@@ -61,6 +174,7 @@ model Invoice {
   corrections    CorrectionLog[]
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
   @@map("invoices")
 }
 
@@ -115,12 +229,18 @@ model IngestionEvent {
   @@map("ingestion_events")
 }
 
-// Application-wide key-value settings (editable from the admin Settings page)
-model Setting {
-  key       String   @id   // e.g. "default_currency", "default_country"
-  value     String
-  updatedAt DateTime @updatedAt
+// ── Settings: now org-scoped (organizationId=null means global/system default) ─
 
+model Setting {
+  id             String   @id @default(uuid())
+  key            String               // e.g. "default_currency", "default_country"
+  value          String
+  organizationId String?              // null = global; org-specific overrides global
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  updatedAt      DateTime @updatedAt
+
+  @@unique([key, organizationId])     // one value per key per org (or global)
+  @@index([organizationId])
   @@map("settings")
 }
 
@@ -129,22 +249,26 @@ model Setting {
 model Project {
   id             String          @id @default(uuid())
   name           String
-  code           String?         @unique
+  code           String?
   address        String?
   city           String?
   vat            String?         // Tax/NIT number
-  supervisor     String?         // Person responsible for the project
+  supervisor     String?
   budget         Float?
   currency       String          @default("COP")
   status         String          @default("active") // active | closed | on_hold
   description    String?
   startDate      DateTime?
   endDate        DateTime?
+  // Tenant isolation
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   purchaseOrders PurchaseOrder[]
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
   @@map("projects")
 }
 
@@ -155,8 +279,8 @@ model PurchaseOrder {
   project        Project?       @relation(fields: [projectId], references: [id])
   vendorId       String?
   vendor         Vendor?        @relation(fields: [vendorId], references: [id])
-  vendorName     String?        // denormalized for fast display
-  vendorTaxId    String?        // NIT / tax ID of vendor
+  vendorName     String?
+  vendorTaxId    String?
   description    String?
   totalAmount    Float?
   currency       String         @default("COP")
@@ -164,12 +288,16 @@ model PurchaseOrder {
   expiryDate     DateTime?
   status         String         @default("open") // open | partially_matched | fully_matched | closed
   source         String         @default("manual") // manual | ocr | erp
-  fileUrl        String?        // stored PO document
-  ocrText        String?        // cleaned OCR text for audit
+  fileUrl        String?
+  ocrText        String?
+  // Tenant isolation
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
   @@map("purchase_orders")
 }
 
@@ -180,26 +308,35 @@ model CajaChica {
   balance        Float?
   currency       String         @default("COP")
   status         String         @default("open") // open | closed
+  // Tenant isolation
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
   @@map("caja_chica")
 }
 
-// ── Custom Extraction Fields ──────────────────────────────────────────────────
+// ── Custom Extraction Fields (org-scoped) ─────────────────────────────────────
 
 model CustomField {
   id              String   @id @default(uuid())
   name            String
-  key             String   @unique
+  key             String
   prompt          String?
   fieldType       String   @default("text")
   isActive        Boolean  @default(true)
   includeInExport Boolean  @default(true)
   displayOrder    Int      @default(0)
+  // Tenant isolation: null = global (ADMIN-managed), org-specific = CLIENT-managed
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id])
   createdAt       DateTime @default(now())
 
+  @@unique([key, organizationId])     // allows same key in different orgs
+  @@index([organizationId])
   @@map("custom_fields")
 }
 
@@ -226,7 +363,7 @@ model InvoiceMatch {
   @@map("invoice_matches")
 }
 
-// ── ERP Export Profiles ───────────────────────────────────────────────────────
+// ── ERP Export Profiles (org-scoped) ─────────────────────────────────────────
 
 model ErpExportProfile {
   id            String   @id @default(uuid())
@@ -234,8 +371,12 @@ model ErpExportProfile {
   erpType       String   @default("custom") // "custom" only; "sinco" is a system preset
   columnMapping String   // JSON: [{ header: string, anzuField: string | null }]
   outputFormat  String   @default("xlsx")   // "xlsx" | "csv"
+  // Tenant isolation
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@index([organizationId])
   @@map("erp_export_profiles")
 }

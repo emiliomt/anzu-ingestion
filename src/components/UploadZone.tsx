@@ -15,13 +15,15 @@ interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
   prefilledEmail?: string;
+  /** Organization ID to associate the upload with (required for provider uploads) */
+  organizationId?: string;
 }
 
 const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 10;
 
-export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [email, setEmail] = useState(prefilledEmail);
@@ -67,6 +69,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
     const formData = new FormData();
     if (email) formData.append("email", email);
     if (name) formData.append("name", name);
+    if (organizationId) formData.append("organizationId", organizationId);
     validFiles.forEach((f) => formData.append("files", f.file));
 
     try {

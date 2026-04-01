@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { safeJsonParse } from "@/lib/utils";
+import { getSessionContext, getTenantFilter, unauthorized, forbidden } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // Tenant-scoped: CLIENT sees only their org metrics; ADMIN sees all
+  const ctx = await getSessionContext();
+  if (!ctx) return unauthorized();
+  if (ctx.role === "PROVIDER") return forbidden("Providers cannot access dashboard metrics");
+
+  const tenantFilter = getTenantFilter(ctx);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
@@ -18,19 +25,21 @@ export async function GET() {
     extractedByChannelRaw,
     oldestExtracted,
   ] = await Promise.all([
-    prisma.invoice.count(),
-    prisma.invoice.count({ where: { submittedAt: { gte: todayStart } } }),
+    prisma.invoice.count({ where: tenantFilter }),
+    prisma.invoice.count({ where: { ...tenantFilter, submittedAt: { gte: todayStart } } }),
     prisma.invoice.groupBy({
       by: ["channel"],
       _count: { id: true },
-      where: { submittedAt: { gte: todayStart } },
+      where: { ...tenantFilter, submittedAt: { gte: todayStart } },
     }),
     prisma.invoice.groupBy({
       by: ["status"],
       _count: { id: true },
+      where: tenantFilter,
     }),
     prisma.invoice.findMany({
       select: { flags: true, isDuplicate: true, status: true },
+      where: tenantFilter,
     }),
     prisma.extractedField.aggregate({
       _avg: { confidence: true },
@@ -40,11 +49,11 @@ export async function GET() {
     prisma.invoice.groupBy({
       by: ["channel"],
       _count: { id: true },
-      where: { status: "extracted" },
+      where: { ...tenantFilter, status: "extracted" },
     }),
     // Oldest invoice awaiting review (for age calculation)
     prisma.invoice.findFirst({
-      where: { status: "extracted" },
+      where: { ...tenantFilter, status: "extracted" },
       orderBy: { submittedAt: "asc" },
       select: { submittedAt: true, flags: true },
     }),

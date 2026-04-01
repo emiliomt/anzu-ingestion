@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionContext, getTenantFilter, unauthorized, forbidden } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const ctx = await getSessionContext();
+  if (!ctx) return unauthorized();
+  if (ctx.role === "PROVIDER") return forbidden("Providers cannot access projects");
+
+  const tenantFilter = getTenantFilter(ctx);
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const q = searchParams.get("q");
 
   const projects = await prisma.project.findMany({
     where: {
+      ...tenantFilter,
       ...(status ? { status } : {}),
       ...(q
         ? {

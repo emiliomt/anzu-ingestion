@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { safeJsonParse } from "@/lib/utils";
+import { getSessionContext, getTenantFilter, unauthorized, forbidden } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  // Tenant-scoped: CLIENT sees only their org; ADMIN sees all
+  const ctx = await getSessionContext();
+  if (!ctx) return unauthorized();
+  if (ctx.role === "PROVIDER") return forbidden("Providers cannot access this endpoint");
+
   const { searchParams } = new URL(request.url);
 
   const rawPage = parseInt(searchParams.get("page") ?? "1");
@@ -19,8 +25,9 @@ export async function GET(request: NextRequest) {
   const flagged = searchParams.get("flagged") === "true";
   const skip = (page - 1) * limit;
 
-  // Build where clause
-  const where: Record<string, unknown> = {};
+  // Build where clause — always inject tenant filter
+  const tenantFilter = getTenantFilter(ctx);
+  const where: Record<string, unknown> = { ...tenantFilter };
 
   if (status) where.status = status;
   if (channel) where.channel = channel;
@@ -115,15 +122,21 @@ export async function GET(request: NextRequest) {
   });
 }
 
-/** Batch delete invoices by IDs */
+/** Batch delete invoices by IDs (CLIENT + ADMIN, scoped to tenant) */
 export async function DELETE(request: NextRequest) {
+  const ctx = await getSessionContext();
+  if (!ctx) return unauthorized();
+  if (ctx.role === "PROVIDER") return forbidden("Providers cannot delete invoices");
+
   const body = await request.json() as { ids: string[] };
   if (!Array.isArray(body.ids) || body.ids.length === 0) {
     return NextResponse.json({ error: "ids array required" }, { status: 400 });
   }
 
+  // Scope delete to the caller's tenant for safety
+  const tenantFilter = getTenantFilter(ctx);
   const { count } = await prisma.invoice.deleteMany({
-    where: { id: { in: body.ids } },
+    where: { id: { in: body.ids }, ...tenantFilter },
   });
 
   return NextResponse.json({ success: true, deleted: count });

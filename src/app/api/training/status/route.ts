@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
+import { upsertGlobalSetting } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function GET() {
     return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
   }
 
-  const jobSetting = await prisma.setting.findUnique({ where: { key: "finetune_job_id" } });
+  const jobSetting = await prisma.setting.findFirst({ where: { key: "finetune_job_id", organizationId: null } });
   if (!jobSetting) {
     return NextResponse.json({ status: "none", message: "No fine-tuning job has been started." });
   }
@@ -42,25 +43,13 @@ export async function GET() {
     // If succeeded, save the fine-tuned model ID for automatic use
     if (job.status === "succeeded" && job.fine_tuned_model) {
       await Promise.all([
-        prisma.setting.upsert({
-          where: { key: "finetune_model_id" },
-          update: { value: job.fine_tuned_model },
-          create: { key: "finetune_model_id", value: job.fine_tuned_model },
-        }),
-        prisma.setting.upsert({
-          where: { key: "finetune_status" },
-          update: { value: "succeeded" },
-          create: { key: "finetune_status", value: "succeeded" },
-        }),
+        upsertGlobalSetting("finetune_model_id", job.fine_tuned_model),
+        upsertGlobalSetting("finetune_status", "succeeded"),
       ]);
     }
 
     if (job.status === "failed" || job.status === "cancelled") {
-      await prisma.setting.upsert({
-        where: { key: "finetune_status" },
-        update: { value: "failed" },
-        create: { key: "finetune_status", value: "failed" },
-      });
+      await upsertGlobalSetting("finetune_status", "failed");
     }
 
     return NextResponse.json({

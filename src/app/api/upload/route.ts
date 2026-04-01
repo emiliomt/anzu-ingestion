@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
@@ -7,6 +8,7 @@ import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
+import { validateProviderOrgAccess, writeAuditLog } from "@/lib/auth";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -44,6 +46,46 @@ export async function POST(request: NextRequest) {
   const submittedBy = (formData.get("email") as string | null) ?? null;
   const submittedName = (formData.get("name") as string | null) ?? null;
   const files = formData.getAll("files") as File[];
+
+  // ── Tenant isolation for authenticated uploads ────────────────────────────
+  // If the uploader is a PROVIDER, they must specify which org they're submitting to.
+  // We validate they have an accepted connection to that org before creating invoices.
+  const { userId } = auth();
+  let uploadOrganizationId: string | null = null;
+
+  if (userId) {
+    const profile = await prisma.userProfile.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (profile?.role === "PROVIDER") {
+      const orgIdFromForm = (formData.get("organizationId") as string | null) ?? null;
+
+      if (!orgIdFromForm) {
+        return NextResponse.json(
+          { error: "Providers must select a client organization before uploading" },
+          { status: 400 }
+        );
+      }
+
+      const hasAccess = await validateProviderOrgAccess(userId, orgIdFromForm);
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "You are not authorized to submit invoices to this organization" },
+          { status: 403 }
+        );
+      }
+
+      uploadOrganizationId = orgIdFromForm;
+    } else if (profile?.role === "CLIENT") {
+      // CLIENT uploads go to their own organization automatically
+      uploadOrganizationId = profile.organizationId;
+    }
+    // ADMIN uploads: organizationId optional — can be specified in form or left null
+    if (profile?.role === "ADMIN") {
+      uploadOrganizationId = (formData.get("organizationId") as string | null) ?? null;
+    }
+  }
 
   if (!files || files.length === 0) {
     return NextResponse.json({ error: "No files provided" }, { status: 400 });
@@ -92,7 +134,7 @@ export async function POST(request: NextRequest) {
       // Find or create vendor
       let vendorId: string | null = null;
 
-      // Create invoice record
+      // Create invoice record — always set organizationId for tenant isolation
       const invoice = await prisma.invoice.create({
         data: {
           referenceNo,
@@ -105,6 +147,7 @@ export async function POST(request: NextRequest) {
           submittedBy,
           submittedName,
           vendorId,
+          organizationId: uploadOrganizationId,
         },
       });
 

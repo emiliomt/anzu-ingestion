@@ -148,18 +148,26 @@ export async function getSettings(): Promise<AppSettings> {
 
 // ── Write ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Upsert a single global setting (organizationId = null).
+ * Prisma 5 does not support null in compound unique where clauses, so we use
+ * findFirst + update/create as a manual upsert.
+ */
+export async function upsertGlobalSetting(key: string, value: string): Promise<void> {
+  const existing = await prisma.setting.findFirst({ where: { key, organizationId: null } });
+  if (existing) {
+    await prisma.setting.update({ where: { id: existing.id }, data: { value } });
+  } else {
+    await prisma.setting.create({ data: { key, value, organizationId: null } });
+  }
+}
+
 export async function saveSettings(
   partial: Partial<Record<string, string>>
 ): Promise<void> {
   await Promise.all(
     Object.entries(partial)
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
-      .map(([key, value]) =>
-        prisma.setting.upsert({
-          where: { key },
-          update: { value },
-          create: { key, value },
-        })
-      )
+      .map(([key, value]) => upsertGlobalSetting(key, value))
   );
 }
