@@ -39,11 +39,11 @@ const RESOURCE_ITEMS = [
 ].map((item, i) => ({ ...item, icon: RESOURCE_ICONS[i] }));
 
 /* ── App launch items ── */
-const APP_ICONS = [LayoutDashboard, GitMerge, ShieldCheck, BookOpen, Upload];
+const APP_ICONS = [LayoutDashboard, ShieldCheck, GitMerge, BookOpen, Upload];
 const APP_ITEMS = [
   { label: "Invoice Ingestor",  desc: "Review & extract invoices",     href: "/admin",          color: "#4F46E5" },
-  { label: "Invoice Matcher",   desc: "Match invoices to POs",          href: "/matcher",        color: "#10B981" },
   { label: "Invoice Security",  desc: "Buyer & vendor verification",   href: "/security",       color: "#DC2626" },
+  { label: "Invoice Matcher",   desc: "Match invoices to POs",          href: "/matcher",        color: "#10B981" },
   { label: "Pre-Accounting",    desc: "P&L and expense classification", href: "/preaccounting",  color: "#EA580C" },
   { label: "Submit an Invoice", desc: "Vendor portal",                  href: "/portal",         color: "#2563EB" },
 ].map((item, i) => ({ ...item, icon: APP_ICONS[i] }));
