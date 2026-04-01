@@ -4,6 +4,7 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
 import { sendConfirmationEmail, sendBounceEmail } from "@/lib/email";
 import { getSettings } from "@/lib/app-settings";
+import { runSecurityCheck } from "@/lib/security-client";
 
 export const dynamic = "force-dynamic";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
@@ -228,6 +229,41 @@ async function processEmailInvoice(
         flags: JSON.stringify(flags),
       },
     });
+
+    // Run security check (anzu-security middleware) — no-op if SECURITY_SERVICE_URL unset
+    const invoiceRecord = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { referenceNo: true },
+    });
+    const securityResult = await runSecurityCheck({
+      invoice_id:   invoiceId,
+      reference_no: invoiceRecord?.referenceNo ?? invoiceId,
+      channel:      "email",
+      vendor_name:    extraction.vendor_name    ? { value: extraction.vendor_name.value,    confidence: extraction.vendor_name.confidence }    : undefined,
+      vendor_tax_id:  undefined,  // not extracted in email path
+      buyer_name:    undefined,
+      buyer_tax_id:  undefined,
+      buyer_address: undefined,
+      total:    extraction.total    ? { value: extraction.total.value,    confidence: extraction.total.confidence }    : undefined,
+      currency: extraction.currency ? { value: extraction.currency.value, confidence: extraction.currency.confidence } : undefined,
+      line_items: extraction.line_items.map((li) => ({
+        description: li.description ?? null,
+        quantity:    li.quantity    ?? null,
+        unit_price:  li.unit_price  ?? null,
+        line_total:  li.line_total  ?? null,
+        category:    li.category    ?? null,
+        confidence:  li.confidence,
+      })),
+    });
+
+    if (securityResult && !securityResult.passed) {
+      flags.push("security_failed");
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data:  { flags: JSON.stringify(flags) },
+      });
+      console.warn(`[Security] Email invoice ${invoiceId} failed: ${securityResult.failure_reasons.join("; ")}`);
+    }
   } catch (err) {
     console.error("[Email Extract]", err);
     await prisma.invoice.update({

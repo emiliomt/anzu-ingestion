@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
 import { buildFewShotSection } from "@/lib/few-shot";
+import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
@@ -401,6 +402,50 @@ async function processInvoice(
         }),
       },
     });
+
+    // Run security check (anzu-security middleware) — non-blocking on failure
+    // If SECURITY_SERVICE_URL is not set this is a no-op.
+    const securityResult = await runSecurityCheck({
+      invoice_id:   invoiceId,
+      reference_no: referenceNo,
+      channel:      "web",
+      vendor_name:    extraction.vendor_name   ? { value: extraction.vendor_name.value,   confidence: extraction.vendor_name.confidence,   is_uncertain: extraction.vendor_name.is_uncertain }   : undefined,
+      vendor_tax_id:  extraction.vendor_tax_id ? { value: extraction.vendor_tax_id.value, confidence: extraction.vendor_tax_id.confidence, is_uncertain: extraction.vendor_tax_id.is_uncertain } : undefined,
+      vendor_address: extraction.vendor_address ? { value: extraction.vendor_address.value, confidence: extraction.vendor_address.confidence, is_uncertain: extraction.vendor_address.is_uncertain } : undefined,
+      buyer_name:    extraction.buyer_name    ? { value: extraction.buyer_name.value,    confidence: extraction.buyer_name.confidence,    is_uncertain: extraction.buyer_name.is_uncertain }    : undefined,
+      buyer_tax_id:  extraction.buyer_tax_id  ? { value: extraction.buyer_tax_id.value,  confidence: extraction.buyer_tax_id.confidence,  is_uncertain: extraction.buyer_tax_id.is_uncertain }  : undefined,
+      buyer_address: extraction.buyer_address ? { value: extraction.buyer_address.value, confidence: extraction.buyer_address.confidence, is_uncertain: extraction.buyer_address.is_uncertain } : undefined,
+      invoice_number: extraction.invoice_number ? { value: extraction.invoice_number.value, confidence: extraction.invoice_number.confidence } : undefined,
+      total:    extraction.total    ? { value: extraction.total.value,    confidence: extraction.total.confidence }    : undefined,
+      currency: extraction.currency ? { value: extraction.currency.value, confidence: extraction.currency.confidence } : undefined,
+      line_items: extraction.line_items.map((li) => ({
+        description: li.description ?? null,
+        quantity:    li.quantity    ?? null,
+        unit_price:  li.unit_price  ?? null,
+        line_total:  li.line_total  ?? null,
+        category:    li.category    ?? null,
+        confidence:  li.confidence,
+      })),
+    });
+
+    if (securityResult && !securityResult.passed) {
+      flags.push("security_failed");
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data:  { flags: JSON.stringify(flags) },
+      });
+      await prisma.ingestionEvent.create({
+        data: {
+          invoiceId,
+          eventType: "security_failed",
+          metadata: JSON.stringify({
+            risk_level:      securityResult.risk_level,
+            failure_reasons: securityResult.failure_reasons,
+          }),
+        },
+      });
+      console.warn(`[Security] Invoice ${invoiceId} failed security check: ${securityResult.failure_reasons.join("; ")}`);
+    }
 
     // Update confirmation email with extracted data
     if (submittedBy?.includes("@")) {
