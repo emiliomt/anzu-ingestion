@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 const ACCOUNT_CODES: Record<string, { code: string; label: string }> = {
   material:  { code: "5100", label: "Materials & Supplies" },
@@ -23,7 +24,7 @@ function getDateFrom(period: string): Date | undefined {
   return undefined; // "all"
 }
 
-export async function GET(req: NextRequest) {
+async function _GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const period = searchParams.get("period") ?? "ytd";
   const projectId = searchParams.get("projectId") ?? undefined;
@@ -170,3 +171,5 @@ export async function GET(req: NextRequest) {
     matchCount: matches.length,
   });
 }
+
+export const GET = withPlanFeature("preaccounting", _GET);

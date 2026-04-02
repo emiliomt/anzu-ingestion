@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 const ACCOUNT_CODES: Record<string, { code: string; label: string }> = {
   material:  { code: "5100", label: "Materials & Supplies" },
@@ -23,7 +24,7 @@ function getDateFrom(period: string): Date | undefined {
   return undefined;
 }
 
-export async function GET(req: NextRequest) {
+async function _GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(100, parseInt(searchParams.get("limit") ?? "50"));
@@ -120,3 +121,5 @@ export async function GET(req: NextRequest) {
     pages: Math.ceil(total / limit),
   });
 }
+
+export const GET = withPlanFeature("preaccounting", _GET);

@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { safeJsonParse } from "@/lib/utils";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function _GET(_req: NextRequest) {
   const [securityFailed, allChecked, recentAll] = await Promise.all([
     // Invoices that failed the security check
     prisma.invoice.findMany({
@@ -76,3 +77,5 @@ export async function GET() {
     })),
   });
 }
+
+export const GET = withPlanFeature("security", _GET);

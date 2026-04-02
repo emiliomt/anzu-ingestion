@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/prisma";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +145,7 @@ function fileTimestamp(): string {
 
 // ── Main handler ───────────────────────────────────────────────────────────────
 
-export async function POST(request: NextRequest) {
+async function _POST(request: NextRequest) {
   try {
     const body = await request.json() as {
       invoiceIds?: string[];
@@ -305,3 +306,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
+export const POST = withPlanFeature("erpExport", _POST);

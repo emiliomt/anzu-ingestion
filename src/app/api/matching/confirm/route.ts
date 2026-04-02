@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function _POST(request: NextRequest) {
   const body = await request.json() as {
     matchId: string;
     confirmedBy?: string;
@@ -30,3 +31,5 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ ok: true, action: "confirmed", id: match.id });
 }
+
+export const POST = withPlanFeature("matching", _POST);

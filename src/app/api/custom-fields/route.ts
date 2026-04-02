@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function _GET(_req: NextRequest) {
   const fields = await prisma.customField.findMany({
     orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
   });
   return NextResponse.json({ fields });
 }
 
-export async function POST(request: NextRequest) {
+async function _POST(request: NextRequest) {
   let body: {
     name?: string;
     key?: string;
@@ -56,3 +57,6 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 }
+
+export const GET = withPlanFeature("customFields", _GET);
+export const POST = withPlanFeature("customFields", _POST);

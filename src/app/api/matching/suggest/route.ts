@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestMatch } from "@/lib/matcher";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
+async function _POST(request: NextRequest) {
   const { invoiceId } = await request.json() as { invoiceId: string };
   if (!invoiceId) {
     return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
@@ -55,3 +56,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
+export const POST = withPlanFeature("matching", _POST);

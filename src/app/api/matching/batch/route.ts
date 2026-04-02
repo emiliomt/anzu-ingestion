@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestMatch } from "@/lib/matcher";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST() {
+async function _POST(_req: NextRequest) {
   // Find invoices that have been extracted but have no confirmed match
   const invoices = await prisma.invoice.findMany({
     where: {
@@ -73,3 +74,5 @@ export async function POST() {
 
   return NextResponse.json({ processed: results.length, results });
 }
+
+export const POST = withPlanFeature("matching", _POST);

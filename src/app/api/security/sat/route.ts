@@ -4,6 +4,7 @@
  * POST → /api/v1/sat/refresh
  */
 import { NextRequest, NextResponse } from "next/server";
+import { withPlanFeature } from "@/lib/plan-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ function securityHeaders() {
   return h;
 }
 
-export async function GET() {
+async function _GET(_req: NextRequest) {
   if (!SECURITY_URL) {
     return NextResponse.json({ connected: false }, { status: 503 });
   }
@@ -31,7 +32,7 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+async function _POST(_req: NextRequest) {
   if (!SECURITY_URL) {
     return NextResponse.json({ error: "SECURITY_SERVICE_URL not configured" }, { status: 503 });
   }
@@ -45,3 +46,6 @@ export async function POST() {
     return NextResponse.json({ error: "Security service unreachable" }, { status: 502 });
   }
 }
+
+export const GET = withPlanFeature("security", _GET);
+export const POST = withPlanFeature("security", _POST);
