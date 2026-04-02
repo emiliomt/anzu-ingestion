@@ -14,7 +14,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
 # Switch Prisma provider to PostgreSQL for production build
-RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
+RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma prisma/migrations/migration_lock.toml
 # Generate Prisma client before building
 RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -26,7 +26,7 @@ ENV NEXT_OUTPUT=standalone
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN mkdir -p /app/public
 RUN npm run build
-# cache-bust: 2026-03-13
+# cache-bust: 2026-04-02
 
 # ---- Runner ----
 FROM base AS runner
