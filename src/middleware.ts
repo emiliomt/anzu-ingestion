@@ -79,6 +79,20 @@ const isProtected = createRouteMatcher([
 export default clerkMiddleware((auth, req) => {
   const { pathname } = req.nextUrl;
 
+  // Redirect signed-in PROVIDER users from /portal to /provider.
+  // /portal is a public page but PROVIDER users must select a client org
+  // before uploading — that flow lives at /provider (ClientSelector → UploadZone).
+  if (pathname === "/portal") {
+    const { userId, sessionClaims } = auth();
+    if (userId) {
+      const meta = (sessionClaims as { publicMetadata?: { role?: string } } | null)
+        ?.publicMetadata;
+      if (meta?.role === "PROVIDER") {
+        return NextResponse.redirect(new URL("/provider", req.url));
+      }
+    }
+  }
+
   // Always allow public routes
   if (isPublic(req)) return;
 
