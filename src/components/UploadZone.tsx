@@ -92,10 +92,11 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         prev.map((f) => {
           const result = data.results.find((r) => r.fileName === f.file.name);
           if (result) {
+            const isSuccess = result.status === "received" || result.status === "pending_approval";
             if (result.status === "received") refs.push(result.referenceNo);
             return {
               ...f,
-              status: result.status === "received" ? "success" : "error",
+              status: isSuccess ? "success" : "error",
               referenceNo: result.referenceNo,
               error: result.error,
             };
