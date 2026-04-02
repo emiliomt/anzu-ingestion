@@ -5,7 +5,7 @@ import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
 import { buildFewShotSection } from "@/lib/few-shot";
 import { runSecurityCheck } from "@/lib/security-client";
-import { sendConfirmationEmail } from "@/lib/email";
+import { sendConfirmationEmail, sendInvoicePendingApprovalEmail, getOrgContactEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { validateProviderOrgAccess, writeAuditLog } from "@/lib/auth";
@@ -52,6 +52,8 @@ export async function POST(request: NextRequest) {
   // We validate they have an accepted connection to that org before creating invoices.
   const { userId } = auth();
   let uploadOrganizationId: string | null = null;
+  let uploaderIsProvider = false;
+  let uploaderName: string | null = null;
 
   if (userId) {
     const profile = await prisma.userProfile.findUnique({
@@ -59,6 +61,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (profile?.role === "PROVIDER") {
+      uploaderIsProvider = true;
+      uploaderName = profile.firstName
+        ? `${profile.firstName}${profile.lastName ? " " + profile.lastName : ""}`
+        : (profile.email ?? null);
       const orgIdFromForm = (formData.get("organizationId") as string | null) ?? null;
 
       if (!orgIdFromForm) {
@@ -134,12 +140,15 @@ export async function POST(request: NextRequest) {
       // Find or create vendor
       let vendorId: string | null = null;
 
+      // Provider-submitted invoices require CLIENT approval before processing
+      const initialStatus = uploaderIsProvider ? "pending_approval" : "processing";
+
       // Create invoice record — always set organizationId for tenant isolation
       const invoice = await prisma.invoice.create({
         data: {
           referenceNo,
           channel: "web",
-          status: "processing",
+          status: initialStatus,
           fileUrl: stored.url,
           fileName: stored.fileName,
           mimeType: stored.mimeType,
@@ -164,24 +173,40 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
-      scheduleBackground(
-        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy).catch(async (err) => {
-          console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
-          // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
-          // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
-          try {
-            await prisma.invoice.update({
-              where: { id: invoice.id },
-              data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
-            });
-          } catch (updateErr) {
-            console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
-          }
-        })
-      );
+      if (uploaderIsProvider) {
+        // Provider invoice awaits CLIENT approval — notify the org contact and skip extraction
+        if (uploadOrganizationId) {
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+          scheduleBackground(
+            getOrgContactEmail(uploadOrganizationId).then((clientEmail) => {
+              if (!clientEmail) return;
+              return sendInvoicePendingApprovalEmail({
+                to: clientEmail,
+                referenceNo,
+                providerName: uploaderName ?? submittedName ?? submittedBy ?? "A supplier",
+                appUrl,
+              });
+            }).catch((e) => console.error("[Upload] Pending approval email failed:", e))
+          );
+        }
+      } else {
+        // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
+        scheduleBackground(
+          processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy).catch(async (err) => {
+            console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
+            try {
+              await prisma.invoice.update({
+                where: { id: invoice.id },
+                data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+              });
+            } catch (updateErr) {
+              console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+            }
+          })
+        );
+      }
 
-      results.push({ referenceNo, fileName: file.name, status: "received" });
+      results.push({ referenceNo, fileName: file.name, status: uploaderIsProvider ? "pending_approval" : "received" });
     } catch (err) {
       console.error("[Upload] Error processing file:", err);
       results.push({

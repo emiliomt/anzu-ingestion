@@ -33,7 +33,8 @@ const isPublic = createRouteMatcher([
   "/portal/sign-in(.*)",
   "/portal/sign-up(.*)",
   "/setup",             // role onboarding (must be accessible before profile exists)
-  "/api/webhooks(.*)",  // SendGrid / Twilio webhooks (HMAC-signed separately)
+  "/api/webhooks(.*)",     // SendGrid / Twilio webhooks (HMAC-signed separately)
+  "/api/billing/webhook", // Stripe webhook (signature-verified internally)
   "/api/status(.*)",
   "/api/upload",        // unauthenticated invoice upload endpoint
   "/api/health",

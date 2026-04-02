@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { clientOrAdmin } from "@/lib/api-guard";
+import { sendProviderInviteEmail } from "@/lib/email";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -101,6 +102,15 @@ export const POST = clientOrAdmin(async (req: NextRequest, ctx) => {
       metadata: JSON.stringify({ providerEmail: parsed.data.providerEmail }),
     },
   });
+
+  // Send invite email (fire-and-forget)
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
+  sendProviderInviteEmail({
+    to: parsed.data.providerEmail,
+    fromOrgName: org?.name ?? "A client",
+    appUrl,
+  }).catch((e) => console.error("[invite-provider] Email failed:", e));
 
   return NextResponse.json({ connection }, { status: 201 });
 }, "provider.invite");

@@ -3,6 +3,7 @@ export type InvoiceStatus =
   | "received"
   | "processing"
   | "extracted"
+  | "pending_approval"
   | "reviewed"
   | "complete"
   | "error";

@@ -29,10 +29,14 @@ model Organization {
   name      String             // Full legal name e.g. "Constructora Bogotá S.A.S."
   taxId     String?            // NIT / RFC / RUT of the company
   country   String   @default("CO")  // ISO-3166 alpha-2 country code
-  plan      String   @default("Starter") // Starter | Growth | Enterprise
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  plan                 String   @default("Starter") // Starter | Growth | Enterprise
+  isActive             Boolean  @default(true)
+  // Stripe billing
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  subscriptionStatus   String?  // active | trialing | past_due | canceled
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   // Relations
   users       UserProfile[]
@@ -158,6 +162,7 @@ model Invoice {
   fineTuneJobId    String?      // fine-tune job id once submitted to AI provider
   correctedBy      String?      // user email or id who made the correction
   correctionNotes  String?      // free-text rationale for the correction
+  rejectionReason  String?      // set when CLIENT rejects a provider invoice
 
   // ── Tenant isolation ──────────────────────────────────────────────────────
   // Set to the Organization.id of the CLIENT the invoice belongs to.

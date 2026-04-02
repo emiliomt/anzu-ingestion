@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { providerOnly } from "@/lib/api-guard";
+import { sendInviteAcceptedEmail, getOrgContactEmail } from "@/lib/email";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,18 @@ export const POST = providerOnly(async (req: NextRequest, ctx) => {
       metadata: JSON.stringify({ organizationName: connection.organization.name }),
     },
   });
+
+  // Notify the client org contact (fire-and-forget)
+  getOrgContactEmail(connection.organizationId).then((clientEmail) => {
+    if (!clientEmail) return;
+    return sendInviteAcceptedEmail({
+      to: clientEmail,
+      providerName: profile.firstName
+        ? `${profile.firstName}${profile.lastName ? " " + profile.lastName : ""}`
+        : (profile.email ?? "Your provider"),
+      orgName: connection.organization.name,
+    });
+  }).catch((e) => console.error("[accept-invite] Email failed:", e));
 
   return NextResponse.json({
     success: true,

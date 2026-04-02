@@ -6,6 +6,7 @@ import {
   LayoutDashboard, FileText, Settings,
   Globe, X, BrainCircuit, Sparkles,
   GitMerge, BookOpen, ExternalLink,
+  CreditCard,
 } from "lucide-react";
 import { AnzuLogo } from "@/components/landing/AnzuLogo";
 
@@ -15,6 +16,12 @@ const NAV_ITEMS = [
   { href: "/admin/training",  label: "Training",   icon: BrainCircuit,    exact: false },
   { href: "/admin/fine-tune", label: "Fine-Tune",  icon: Sparkles,        exact: false },
   { href: "/admin/settings",  label: "Settings",   icon: Settings,        exact: false },
+];
+
+const CLIENT_NAV_ITEMS = [
+  { href: "/client",          label: "Dashboard",  icon: LayoutDashboard, exact: true },
+  { href: "/client/settings", label: "Settings",   icon: Settings,        exact: false },
+  { href: "/client/billing",  label: "Billing",    icon: CreditCard,      exact: false },
 ];
 
 const OTHER_APPS = [
@@ -36,9 +43,7 @@ export function AdminSidebar({ mobileOpen, onMobileClose, portalMode = "admin" }
   const isActive = (href: string, exact: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
 
-  const visibleNavItems = portalMode === "client"
-    ? NAV_ITEMS.filter(({ href }) => !href.includes("/training") && !href.includes("/fine-tune"))
-    : NAV_ITEMS;
+  const visibleNavItems = portalMode === "client" ? CLIENT_NAV_ITEMS : NAV_ITEMS;
 
   function SidebarContent() {
     return (

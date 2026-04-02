@@ -18,6 +18,10 @@ const STATUS_CONFIG: Record<
     label: "Extracted",
     classes: "bg-purple-50 text-purple-700 border border-purple-100",
   },
+  pending_approval: {
+    label: "Pending Approval",
+    classes: "bg-amber-50 text-amber-700 border border-amber-200",
+  },
   reviewed: {
     label: "Reviewed",
     classes: "bg-indigo-50 text-indigo-700 border border-indigo-100",

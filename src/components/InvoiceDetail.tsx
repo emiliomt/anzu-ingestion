@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import {
   X, ExternalLink, CheckCircle, Edit2, Save, AlertTriangle,
   FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge,
-  BookMarked, Trash2,
+  BookMarked, Trash2, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceDetail as InvoiceDetailType, ExtractedFieldData } from "@/types/invoice";
@@ -54,6 +54,10 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
   const [matchConfirmed, setMatchConfirmed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [approvingInvoice, setApprovingInvoice] = useState(false);
+  const [rejectingInvoice, setRejectingInvoice] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectModal, setShowRejectModal] = useState(false);
 
   useEffect(() => {
     // Load match status
@@ -134,6 +138,37 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleApproveInvoice = async () => {
+    setApprovingInvoice(true);
+    try {
+      const res = await fetch(`/api/client/invoices/${invoiceId}/approve`, { method: "POST" });
+      if (res.ok) {
+        setInvoice((prev) => prev ? { ...prev, status: "reviewed" as InvoiceDetailType["status"] } : prev);
+        onStatusChange?.();
+      }
+    } catch (err) { console.error(err); }
+    finally { setApprovingInvoice(false); }
+  };
+
+  const handleRejectInvoice = async () => {
+    if (!rejectReason.trim()) return;
+    setRejectingInvoice(true);
+    try {
+      const res = await fetch(`/api/client/invoices/${invoiceId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+      if (res.ok) {
+        setInvoice((prev) => prev ? { ...prev, status: "error" as InvoiceDetailType["status"] } : prev);
+        setShowRejectModal(false);
+        setRejectReason("");
+        onStatusChange?.();
+      }
+    } catch (err) { console.error(err); }
+    finally { setRejectingInvoice(false); }
   };
 
   const handleSaveGroundTruth = async () => {
@@ -342,6 +377,56 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
         {/* Right: Extracted data */}
         <div className="w-1/2 overflow-auto">
           <div className="p-4 space-y-4">
+            {/* Approve / Reject for pending_approval invoices */}
+            {invoice.status === "pending_approval" && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 mb-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="text-xs text-amber-800 flex-1">This invoice is awaiting your approval.</span>
+                <button
+                  onClick={handleApproveInvoice}
+                  disabled={approvingInvoice}
+                  className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 font-medium"
+                >
+                  <ThumbsUp className="w-3 h-3" />
+                  {approvingInvoice ? "..." : "Approve"}
+                </button>
+                <button
+                  onClick={() => setShowRejectModal(true)}
+                  className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600 font-medium"
+                >
+                  <ThumbsDown className="w-3 h-3" />
+                  Reject
+                </button>
+              </div>
+            )}
+
+            {/* Reject reason modal */}
+            {showRejectModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                  <h3 className="font-semibold text-gray-900 mb-3">Reject Invoice</h3>
+                  <p className="text-sm text-gray-500 mb-3">Please provide a reason so the supplier can correct their submission.</p>
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="e.g. Invoice number is missing, incorrect total..."
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 resize-none mb-4"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button
+                      onClick={handleRejectInvoice}
+                      disabled={!rejectReason.trim() || rejectingInvoice}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50"
+                    >
+                      {rejectingInvoice ? "Rejecting..." : "Confirm Reject"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Status actions */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500">Change status:</span>
