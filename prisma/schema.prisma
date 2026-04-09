@@ -1,17 +1,22 @@
-// AnzuIngestion — Prisma schema
-// Default: SQLite for local dev. Switch provider to "postgresql" for production.
+// Anzu Dynamics — Prisma Schema
+// Automates the full invoice lifecycle: OCR extraction, AI validation,
+// RPA-driven ERP submission, and VAT recovery for Mexico and Colombia.
+// Provider: PostgreSQL (production) — switch DATABASE_URL accordingly.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// ── Vendor ────────────────────────────────────────────────────────────────────
+
 model Vendor {
   id             String          @id @default(uuid())
+  organizationId String?         // Clerk org ID — null = legacy single-tenant
   name           String
   email          String?
   phone          String?
@@ -21,46 +26,51 @@ model Vendor {
   invoices       Invoice[]
   purchaseOrders PurchaseOrder[]
 
+  @@index([organizationId])
   @@map("vendors")
 }
 
+// ── Invoice ───────────────────────────────────────────────────────────────────
+
 model Invoice {
-  id           String           @id @default(uuid())
-  referenceNo  String           @unique
-  channel      String           // web | email | whatsapp
-  status       String           @default("received") // received | processing | extracted | reviewed | complete | error
-  fileUrl      String           // local path or S3 URL
-  fileName     String
-  mimeType     String
-  fileSize     Int?
-  submittedBy  String?          // email address or phone number
-  submittedName String?         // provider name if given
-  submittedAt  DateTime         @default(now())
-  processedAt  DateTime?
-  paidAt       DateTime?  // set by admin when payment is confirmed
-  reviewedBy   String?
-  flags        String           @default("[]")  // JSON array of flag strings
-  isDuplicate  Boolean          @default(false)
-  duplicateOf  String?          // references another invoice id
-  ocrText      String?          // cleaned OCR text — stored for few-shot learning & fine-tuning
-  updatedAt    DateTime         @default(now()) @updatedAt
+  id            String  @id @default(uuid())
+  organizationId String?         // Clerk org ID — null = legacy single-tenant
+  referenceNo   String           @unique
+  channel       String           // web | email | whatsapp
+  status        String           @default("received") // received | processing | extracted | reviewed | complete | error
+  fileUrl       String           // local path or S3 URL
+  fileName      String
+  mimeType      String
+  fileSize      Int?
+  submittedBy   String?          // email address or phone number
+  submittedName String?          // provider name if given
+  submittedAt   DateTime         @default(now())
+  processedAt   DateTime?
+  paidAt        DateTime?        // set by admin when payment is confirmed
+  reviewedBy    String?
+  flags         String           @default("[]")  // JSON array of flag strings
+  isDuplicate   Boolean          @default(false)
+  duplicateOf   String?          // references another invoice id
+  ocrText       String?          // cleaned OCR text — stored for few-shot learning & fine-tuning
+  updatedAt     DateTime         @default(now()) @updatedAt
 
   // ── Human Corrections & Fine-Tuning ─────────────────────────────────────────
-  // correctedData stored as JSON string for SQLite compat; swap to Json? on PostgreSQL-only
-  correctedData    String?      // serialised JSON of the corrected extraction payload
-  fineTuneStatus   String       @default("PENDING") // PENDING | READY | UPLOADED | ERROR
-  fineTuneJobId    String?      // fine-tune job id once submitted to AI provider
-  correctedBy      String?      // user email or id who made the correction
-  correctionNotes  String?      // free-text rationale for the correction
+  correctedData   String?        // serialised JSON of the corrected extraction payload
+  fineTuneStatus  String         @default("PENDING") // PENDING | READY | UPLOADED | ERROR
+  fineTuneJobId   String?        // fine-tune job id once submitted to AI provider
+  correctedBy     String?        // user email or id who made the correction
+  correctionNotes String?        // free-text rationale for the correction
 
-  vendorId     String?
-  vendor       Vendor?          @relation(fields: [vendorId], references: [id])
+  vendorId       String?
+  vendor         Vendor?          @relation(fields: [vendorId], references: [id])
   extractedData  ExtractedField[]
   lineItems      LineItem[]
   events         IngestionEvent[]
   corrections    CorrectionLog[]
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
+  @@index([organizationId, status])
   @@map("invoices")
 }
 
@@ -115,21 +125,28 @@ model IngestionEvent {
   @@map("ingestion_events")
 }
 
-// Application-wide key-value settings (editable from the admin Settings page)
-model Setting {
-  key       String   @id   // e.g. "default_currency", "default_country"
-  value     String
-  updatedAt DateTime @updatedAt
+// ── Settings ──────────────────────────────────────────────────────────────────
+// Application-wide key-value settings (editable from the admin Settings page).
+// Multi-tenant: composite PK (organizationId + key). Legacy rows use organizationId="default".
 
+model Setting {
+  organizationId String   @default("default")
+  key            String   // e.g. "default_currency", "default_country"
+  value          String
+  updatedAt      DateTime @updatedAt
+
+  @@id([organizationId, key])
+  @@index([organizationId])
   @@map("settings")
 }
 
-// ── Project / PO Matching Module ─────────────────────────────────────────────
+// ── Project / PO Matching Module ──────────────────────────────────────────────
 
 model Project {
   id             String          @id @default(uuid())
+  organizationId String?         // Clerk org ID — null = legacy single-tenant
   name           String
-  code           String?         @unique
+  code           String?
   address        String?
   city           String?
   vat            String?         // Tax/NIT number
@@ -145,12 +162,15 @@ model Project {
   purchaseOrders PurchaseOrder[]
   invoiceMatches InvoiceMatch[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("projects")
 }
 
 model PurchaseOrder {
   id             String         @id @default(uuid())
-  poNumber       String         @unique
+  organizationId String?        // Clerk org ID — null = legacy single-tenant
+  poNumber       String
   projectId      String?
   project        Project?       @relation(fields: [projectId], references: [id])
   vendorId       String?
@@ -170,11 +190,14 @@ model PurchaseOrder {
   updatedAt      DateTime       @updatedAt
   invoiceMatches InvoiceMatch[]
 
+  @@unique([organizationId, poNumber])
+  @@index([organizationId])
   @@map("purchase_orders")
 }
 
 model CajaChica {
   id             String         @id @default(uuid())
+  organizationId String?        // Clerk org ID — null = legacy single-tenant
   name           String
   period         String?        // e.g. "Q1-2025"
   balance        Float?
@@ -184,6 +207,7 @@ model CajaChica {
   updatedAt      DateTime       @updatedAt
   invoiceMatches InvoiceMatch[]
 
+  @@index([organizationId])
   @@map("caja_chica")
 }
 
@@ -191,8 +215,9 @@ model CajaChica {
 
 model CustomField {
   id              String   @id @default(uuid())
+  organizationId  String?  // Clerk org ID — null = legacy single-tenant
   name            String
-  key             String   @unique
+  key             String
   prompt          String?
   fieldType       String   @default("text")
   isActive        Boolean  @default(true)
@@ -200,11 +225,14 @@ model CustomField {
   displayOrder    Int      @default(0)
   createdAt       DateTime @default(now())
 
+  @@unique([organizationId, key])
+  @@index([organizationId])
   @@map("custom_fields")
 }
 
 model InvoiceMatch {
   id              String         @id @default(uuid())
+  organizationId  String?        // Clerk org ID — null = legacy single-tenant
   invoiceId       String
   invoice         Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   matchType       String         // "project" | "purchase_order" | "caja_chica"
@@ -223,19 +251,70 @@ model InvoiceMatch {
   confirmedBy     String?
   confirmedAt     DateTime?
 
+  @@index([organizationId])
   @@map("invoice_matches")
 }
 
 // ── ERP Export Profiles ───────────────────────────────────────────────────────
 
 model ErpExportProfile {
-  id            String   @id @default(uuid())
-  name          String
-  erpType       String   @default("custom") // "custom" only; "sinco" is a system preset
-  columnMapping String   // JSON: [{ header: string, anzuField: string | null }]
-  outputFormat  String   @default("xlsx")   // "xlsx" | "csv"
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(uuid())
+  organizationId String?  // Clerk org ID — null = legacy single-tenant
+  name           String
+  erpType        String   @default("custom") // "custom" only; "sinco" is a system preset
+  columnMapping  String   // JSON: [{ header: string, anzuField: string | null }]
+  outputFormat   String   @default("xlsx")   // "xlsx" | "csv"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  @@index([organizationId])
   @@map("erp_export_profiles")
+}
+
+// ── Encrypted ERP Credential Vault ───────────────────────────────────────────
+// ERP passwords are AES-256-GCM encrypted before storage.
+// Decryption key lives in VAULT_KEY env var only — never in DB.
+
+model ErpCredential {
+  id             String   @id @default(uuid())
+  organizationId String   // Clerk org ID — required, never null
+  erpType        String   // "sinco" | "sap_b1" | "contpaq" | "siigo" | "custom"
+  label          String   // human-readable name, e.g. "SINCO Producción"
+  encryptedData  String   // AES-256-GCM ciphertext (base64) of JSON credential blob
+  iv             String   // base64-encoded 96-bit IV
+  authTag        String   // base64-encoded 128-bit GCM auth tag
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("erp_credentials")
+}
+
+// ── Demo Sessions (shareable no-login 30-min preview links) ──────────────────
+
+model DemoSession {
+  id             String   @id @default(uuid())
+  token          String   @unique  // signed JWT (DEMO_JWT_SECRET)
+  organizationId String            // links to the seeded demo org
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@map("demo_sessions")
+}
+
+// ── Subscription (Stripe billing) ────────────────────────────────────────────
+
+model Subscription {
+  id               String    @id @default(uuid())
+  organizationId   String    @unique  // one subscription per org
+  stripeCustomerId String?
+  stripeSubId      String?
+  plan             String    @default("demo") // "demo" | "starter" | "growth" | "enterprise"
+  status           String    @default("active") // "active" | "past_due" | "canceled" | "trialing"
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("subscriptions")
 }
