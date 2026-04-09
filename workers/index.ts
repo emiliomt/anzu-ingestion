@@ -29,14 +29,26 @@ invoiceWorker.on("error", (err) => {
   console.error("[invoice-worker] Worker error:", err);
 });
 
-// ── RPA worker placeholder — implemented in Step 3 ───────────────────────────
-// import { createRpaWorker } from "../src/lib/jobs/workers/rpa.worker";
-// const rpaWorker = createRpaWorker(REDIS_URL);
+// ── RPA worker ────────────────────────────────────────────────────────────────
+import { createRpaWorker } from "../src/lib/jobs/workers/rpa.worker";
+const rpaWorker = createRpaWorker(REDIS_URL);
+
+rpaWorker.on("completed", (job) => {
+  console.log(`[rpa-worker] ✓ Job ${job.id} completed`);
+});
+
+rpaWorker.on("failed", (job, err) => {
+  console.error(`[rpa-worker] ✗ Job ${job?.id} failed:`, err.message);
+});
+
+rpaWorker.on("error", (err) => {
+  console.error("[rpa-worker] Worker error:", err);
+});
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown() {
   console.log("[workers] Shutting down gracefully...");
-  await invoiceWorker.close();
+  await Promise.all([invoiceWorker.close(), rpaWorker.close()]);
   process.exit(0);
 }
 
