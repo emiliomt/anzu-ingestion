@@ -1,7 +1,10 @@
 version: "3.9"
 
+# Anzu Dynamics — Docker Compose
+# Services: PostgreSQL 16 + Redis 7 (BullMQ) + Next.js app + anzu-security Python service
+
 services:
-  # PostgreSQL database (for local production-like dev)
+  # ── PostgreSQL database ──────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -13,8 +16,27 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anzu -d anzuingestion"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # AnzuIngestion app
+  # ── Redis (BullMQ background jobs) ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── AnzuIngestion — Next.js app ───────────────────────────────────────────────
   app:
     build: .
     restart: unless-stopped
@@ -22,16 +44,51 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://anzu:anzupassword@postgres:5432/anzuingestion
+      REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
-      STORAGE_TYPE: local
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_PATH: /app/uploads
       NODE_ENV: production
+      # Clerk auth
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      # Credential vault
+      VAULT_KEY: ${VAULT_KEY:-}
+      # Stripe billing
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+      # Demo sessions
+      DEMO_JWT_SECRET: ${DEMO_JWT_SECRET:-}
+      DEMO_SESSION_TTL_MINUTES: ${DEMO_SESSION_TTL_MINUTES:-30}
+      # Security microservice (optional)
+      SECURITY_SERVICE_URL: ${SECURITY_SERVICE_URL:-}
+      SECURITY_API_KEY: ${SECURITY_API_KEY:-}
     volumes:
       - uploads_data:/app/uploads
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── anzu-security — Python FastAPI microservice (optional) ───────────────────
+  # Remove this service if not using the SAT EFOS blacklist checker.
+  security:
+    build: ./anzu-security
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://anzu:anzupassword@postgres:5432/anzusecurity
+      API_KEY: ${SECURITY_API_KEY:-changeme}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   uploads_data:
+  redis_data:

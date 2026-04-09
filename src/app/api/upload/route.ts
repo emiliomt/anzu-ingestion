@@ -1,4 +1,10 @@
+// Anzu Dynamics — Invoice Upload API
+// POST /api/upload — accepts multipart form-data with invoice files (PDF/image/XML).
+// Public route (no auth required) for vendor portal uploads.
+// When called by an authenticated user, injects their organizationId.
+
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
@@ -7,6 +13,7 @@ import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
+import { checkQuotaOrNull } from "@/lib/quota";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -44,6 +51,22 @@ export async function POST(request: NextRequest) {
   const submittedBy = (formData.get("email") as string | null) ?? null;
   const submittedName = (formData.get("name") as string | null) ?? null;
   const files = formData.getAll("files") as File[];
+
+  // Resolve organizationId from Clerk session if authenticated.
+  // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
+  const { orgId: organizationId } = await auth();
+
+  // Enforce per-org monthly quota (unauthenticated uploads are always allowed)
+  const quota = await checkQuotaOrNull(organizationId);
+  if (!quota.allowed) {
+    return NextResponse.json(
+      {
+        error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
+        quota,
+      },
+      { status: 429 }
+    );
+  }
 
   if (!files || files.length === 0) {
     return NextResponse.json({ error: "No files provided" }, { status: 400 });
@@ -92,7 +115,7 @@ export async function POST(request: NextRequest) {
       // Find or create vendor
       let vendorId: string | null = null;
 
-      // Create invoice record
+      // Create invoice record — inject organizationId when user is authenticated
       const invoice = await prisma.invoice.create({
         data: {
           referenceNo,
@@ -105,6 +128,7 @@ export async function POST(request: NextRequest) {
           submittedBy,
           submittedName,
           vendorId,
+          ...(organizationId ? { organizationId } : {}),
         },
       });
 
@@ -123,7 +147,7 @@ export async function POST(request: NextRequest) {
 
       // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
       scheduleBackground(
-        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy).catch(async (err) => {
+        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
           console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
           // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
           // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
@@ -170,7 +194,8 @@ async function processInvoice(
   referenceNo: string,
   buffer: Buffer,
   mimeType: string,
-  submittedBy: string | null
+  submittedBy: string | null,
+  organizationId?: string | null
 ) {
   await prisma.ingestionEvent.create({
     data: {
@@ -179,8 +204,8 @@ async function processInvoice(
     },
   });
 
-  // Load settings for this extraction run
-  const settings = await getSettings();
+  // Load settings scoped to this organization (with global fallback)
+  const settings = await getSettings(organizationId ?? null);
 
   // Load active custom fields
   const activeCustomFields = await prisma.customField.findMany({

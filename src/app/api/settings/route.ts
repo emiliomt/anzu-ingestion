@@ -1,10 +1,21 @@
-import { NextResponse } from "next/server";
-import { getSettings, saveSettings } from "@/lib/app-settings";
+// Anzu Dynamics — Settings API (tenant-scoped)
+// GET  /api/settings — return settings for current org (with global fallback)
+// POST /api/settings — persist partial updates for current org (admin only)
 
-// GET /api/settings — return current settings
+import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { getSettings, saveSettings } from "@/lib/app-settings";
+import { requireAdmin, RoleError } from "@/lib/roles";
+
+export const dynamic = "force-dynamic";
+
+// ── GET /api/settings ──────────────────────────────────────────────────────────
+
 export async function GET() {
   try {
-    const settings = await getSettings();
+    const { orgId } = await auth();
+    // Return settings scoped to the current org (with global fallback)
+    const settings = await getSettings(orgId ?? null);
     return NextResponse.json(settings);
   } catch (err) {
     console.error("[settings GET]", err);
@@ -12,10 +23,13 @@ export async function GET() {
   }
 }
 
-// POST /api/settings — persist partial updates
+// ── POST /api/settings — admin only ───────────────────────────────────────────
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const { orgId } = await requireAdmin();
+
+    const body = await req.json() as Record<string, unknown>;
 
     // Coerce every value to string for the key-value store
     const partial: Record<string, string> = {};
@@ -29,10 +43,13 @@ export async function POST(req: Request) {
       }
     }
 
-    await saveSettings(partial);
-    const updated = await getSettings();
+    await saveSettings(partial, orgId);
+    const updated = await getSettings(orgId);
     return NextResponse.json(updated);
   } catch (err) {
+    if (err instanceof RoleError) {
+      return NextResponse.json({ error: err.message }, { status: err.statusCode });
+    }
     console.error("[settings POST]", err);
     return NextResponse.json({ error: "Failed to save settings" }, { status: 500 });
   }

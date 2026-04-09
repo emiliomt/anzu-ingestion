@@ -18,7 +18,7 @@ export async function GET() {
     return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
   }
 
-  const jobSetting = await prisma.setting.findUnique({ where: { key: "finetune_job_id" } });
+  const jobSetting = await prisma.setting.findUnique({ where: { organizationId_key: { organizationId: "default", key: "finetune_job_id" } } });
   if (!jobSetting) {
     return NextResponse.json({ status: "none", message: "No fine-tuning job has been started." });
   }
@@ -43,23 +43,23 @@ export async function GET() {
     if (job.status === "succeeded" && job.fine_tuned_model) {
       await Promise.all([
         prisma.setting.upsert({
-          where: { key: "finetune_model_id" },
+          where: { organizationId_key: { organizationId: "default", key: "finetune_model_id" } },
           update: { value: job.fine_tuned_model },
-          create: { key: "finetune_model_id", value: job.fine_tuned_model },
+          create: { organizationId: "default", key: "finetune_model_id", value: job.fine_tuned_model },
         }),
         prisma.setting.upsert({
-          where: { key: "finetune_status" },
+          where: { organizationId_key: { organizationId: "default", key: "finetune_status" } },
           update: { value: "succeeded" },
-          create: { key: "finetune_status", value: "succeeded" },
+          create: { organizationId: "default", key: "finetune_status", value: "succeeded" },
         }),
       ]);
     }
 
     if (job.status === "failed" || job.status === "cancelled") {
       await prisma.setting.upsert({
-        where: { key: "finetune_status" },
+        where: { organizationId_key: { organizationId: "default", key: "finetune_status" } },
         update: { value: "failed" },
-        create: { key: "finetune_status", value: "failed" },
+        create: { organizationId: "default", key: "finetune_status", value: "failed" },
       });
     }
 

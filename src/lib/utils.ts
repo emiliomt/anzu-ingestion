@@ -1,4 +1,11 @@
 import { v4 as uuidv4 } from "uuid";
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+/** Merge Tailwind classes safely — used by all shadcn/ui components */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 /** Generate a human-readable reference number like AZ-2024-A1B2C3 */
 export function generateReferenceNo(): string {

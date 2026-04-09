@@ -9,6 +9,29 @@
 ───────────────────────────────────────────────────────────────────────────── */
 
 :root {
+  /* ── shadcn/ui CSS variable tokens ──────────────────────────────────────── */
+  /* Mapped to Tailwind in tailwind.config.ts. Override here to customize. */
+  --background:             0 0% 100%;
+  --foreground:             222 47% 11%;
+  --muted:                  210 40% 96%;
+  --muted-foreground:       215 16% 47%;
+  --popover:                0 0% 100%;
+  --popover-foreground:     222 47% 11%;
+  --card:                   0 0% 100%;
+  --card-foreground:        222 47% 11%;
+  --border:                 214 32% 91%;
+  --input:                  214 32% 91%;
+  --primary:                24 95% 53%;    /* orange-500 — Anzu brand */
+  --primary-foreground:     0 0% 100%;
+  --secondary:              210 40% 96%;
+  --secondary-foreground:   222 47% 11%;
+  --accent:                 210 40% 96%;
+  --accent-foreground:      222 47% 11%;
+  --destructive:            0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --ring:                   24 95% 53%;    /* orange-500 — matches primary */
+  --radius:                 0.5rem;
+
   /* Typography */
   --font-display: "Jost", system-ui, sans-serif;
   --font-body:    "Instrument Serif", Georgia, serif;

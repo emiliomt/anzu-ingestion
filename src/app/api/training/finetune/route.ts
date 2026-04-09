@@ -26,10 +26,10 @@ export async function POST(_request: NextRequest) {
 
   // Check for an already-running job
   const existingJob = await prisma.setting.findUnique({
-    where: { key: "finetune_job_id" },
+    where: { organizationId_key: { organizationId: "default", key: "finetune_job_id" } },
   });
   const existingStatus = await prisma.setting.findUnique({
-    where: { key: "finetune_status" },
+    where: { organizationId_key: { organizationId: "default", key: "finetune_status" } },
   });
   if (existingJob && existingStatus?.value === "running") {
     return NextResponse.json(
@@ -134,14 +134,14 @@ Return ONLY valid JSON — no preamble, no markdown fences, no explanation.\n\nI
     // Persist job state in settings
     await Promise.all([
       prisma.setting.upsert({
-        where: { key: "finetune_job_id" },
+        where: { organizationId_key: { organizationId: "default", key: "finetune_job_id" } },
         update: { value: job.id },
-        create: { key: "finetune_job_id", value: job.id },
+        create: { organizationId: "default", key: "finetune_job_id", value: job.id },
       }),
       prisma.setting.upsert({
-        where: { key: "finetune_status" },
+        where: { organizationId_key: { organizationId: "default", key: "finetune_status" } },
         update: { value: "running" },
-        create: { key: "finetune_status", value: "running" },
+        create: { organizationId: "default", key: "finetune_status", value: "running" },
       }),
       // Clear any previously trained model so we don't use it during training
       prisma.setting.deleteMany({ where: { key: "finetune_model_id" } }),

@@ -1,7 +1,14 @@
+// Anzu Dynamics — Invoice Detail API (tenant-scoped)
+// GET   /api/invoices/[id] — full invoice detail + tenant ownership check
+// PATCH /api/invoices/[id] — field edit / status update (admin only)
+// DELETE /api/invoices/[id] — delete invoice (admin only)
+
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { safeJsonParse } from "@/lib/utils";
 import { getServeUrl } from "@/lib/storage";
+import { requireAdmin, RoleError } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const { orgId } = await auth();
 
   const invoice = await prisma.invoice.findUnique({
     where: { id },
@@ -22,6 +30,11 @@ export async function GET(
   });
 
   if (!invoice) {
+    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  }
+
+  // Tenant ownership check — prevent cross-org data access
+  if (orgId && invoice.organizationId && invoice.organizationId !== orgId) {
     return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
   }
 
@@ -70,21 +83,37 @@ export async function GET(
   });
 }
 
-/** Delete an invoice and all related data */
+/** Delete an invoice and all related data — admin only */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  try {
+    const { orgId } = await requireAdmin();
+    const { id } = await params;
 
-  const invoice = await prisma.invoice.findUnique({ where: { id }, select: { id: true } });
-  if (!invoice) {
-    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!invoice) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    // Cross-tenant guard
+    if (orgId && invoice.organizationId && invoice.organizationId !== orgId) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    await prisma.invoice.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    if (err instanceof RoleError) {
+      return NextResponse.json({ error: err.message }, { status: err.statusCode });
+    }
+    throw err;
   }
-
-  await prisma.invoice.delete({ where: { id } });
-
-  return NextResponse.json({ success: true });
 }
 
 /** Update a field value (inline edit from admin dashboard) */
