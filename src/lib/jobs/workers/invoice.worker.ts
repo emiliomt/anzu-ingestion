@@ -1,15 +1,15 @@
-// Anzu Dynamics — Invoice Processing Worker
-// BullMQ worker that handles the OCR + AI extraction pipeline.
-// Runs as a standalone process via workers/index.ts (not in Next.js runtime).
+// Anzu Dynamics — Invoice Processing Worker (BullMQ)
+// Handles jobs from the "invoice-processing" queue.
+// Pipeline: download file → OCR + AI extraction → store fields → update status.
 //
-// Pipeline:
-//   1. Download invoice file from storage
-//   2. Run OCR / XML parsing (delegates to existing src/lib/claude.ts logic)
-//   3. Update Invoice record status + extracted fields
-//   4. Trigger AI PO matching suggestion
+// Runs as a standalone process via workers/index.ts (NOT inside Next.js runtime).
+// Concurrency 3: each job calls the OpenAI API; CPU is not the bottleneck.
 
 import { Worker, Job } from "bullmq";
 import { Redis } from "ioredis";
+import { prisma } from "../../prisma";
+import { readFile } from "../../storage";
+import { processInvoicePipeline } from "../process-invoice";
 import type { InvoiceJobData } from "../queues";
 
 export function createInvoiceWorker(redisUrl: string): Worker {
@@ -24,22 +24,65 @@ export function createInvoiceWorker(redisUrl: string): Worker {
       const { invoiceId, organizationId, fileUrl, mimeType } = job.data;
 
       console.log(
-        `[invoice-worker] Processing invoice ${invoiceId} for org ${organizationId}`
+        `[invoice-worker] Processing ${invoiceId} (org: ${organizationId}, mime: ${mimeType})`
       );
 
-      // NOTE: Full pipeline implementation in Step 5.
-      // This scaffold ensures the queue + worker infrastructure is wired up.
-      // The actual OCR call will import from src/lib/claude.ts.
+      await job.updateProgress(5);
+
+      // ── 1. Verify the invoice record still exists ─────────────────────────
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { id: true, referenceNo: true, submittedBy: true, status: true },
+      });
+
+      if (!invoice) {
+        throw new Error(`Invoice ${invoiceId} not found in database`);
+      }
+
+      // Skip if already processed (e.g. job was retried but inline processing
+      // already succeeded in the interim)
+      if (invoice.status !== "processing" && invoice.status !== "received") {
+        console.log(
+          `[invoice-worker] Skipping ${invoiceId} — already in status "${invoice.status}"`
+        );
+        return { invoiceId, status: invoice.status, skipped: true };
+      }
 
       await job.updateProgress(10);
-      console.log(`[invoice-worker] Extracting: ${fileUrl} (${mimeType})`);
+
+      // ── 2. Download file buffer from storage ─────────────────────────────
+      console.log(`[invoice-worker] Reading file: ${fileUrl}`);
+      const buffer = await readFile(fileUrl);
+
+      await job.updateProgress(20);
+
+      // ── 3. Run the full OCR + extraction pipeline ─────────────────────────
+      await processInvoicePipeline(
+        invoiceId,
+        invoice.referenceNo,
+        buffer,
+        mimeType,
+        invoice.submittedBy,
+        organizationId
+      );
+
       await job.updateProgress(100);
 
-      return { invoiceId, status: "extracted" };
+      // Reload final status from DB for the return value
+      const updated = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { status: true },
+      });
+
+      console.log(
+        `[invoice-worker] Completed ${invoiceId} → status: ${updated?.status}`
+      );
+
+      return { invoiceId, status: updated?.status ?? "extracted" };
     },
     {
       connection,
-      concurrency: 3, // process up to 3 invoices simultaneously
+      concurrency: 3,
     }
   );
 }

@@ -13,6 +13,7 @@ import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
+import { checkQuotaOrNull } from "@/lib/quota";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -54,6 +55,18 @@ export async function POST(request: NextRequest) {
   // Resolve organizationId from Clerk session if authenticated.
   // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
   const { orgId: organizationId } = await auth();
+
+  // Enforce per-org monthly quota (unauthenticated uploads are always allowed)
+  const quota = await checkQuotaOrNull(organizationId);
+  if (!quota.allowed) {
+    return NextResponse.json(
+      {
+        error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
+        quota,
+      },
+      { status: 429 }
+    );
+  }
 
   if (!files || files.length === 0) {
     return NextResponse.json({ error: "No files provided" }, { status: 400 });
