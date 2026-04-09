@@ -5,30 +5,19 @@ echo "PORT:       ${PORT:-3000}"
 echo "NODE_ENV:   ${NODE_ENV:-production}"
 echo "DATABASE:   ${DATABASE_URL:+SET (hidden)}"
 
-echo ""
-echo ">>> Running prisma db push..."
-
-# Retry prisma db push up to 10 times with exponential backoff.
-# Uses shell `if` so a failed push does NOT trigger set -e / early exit.
-DB_PUSH_OK=0
-ATTEMPT=1
-DELAY=2
-while [ "$ATTEMPT" -le 10 ]; do
-  if node ./node_modules/prisma/build/index.js db push --skip-generate; then
-    DB_PUSH_OK=1
-    echo ">>> Prisma db push succeeded on attempt $ATTEMPT"
-    break
+# Run prisma db push once with a hard cap so it can never block server startup.
+# If DATABASE_URL is absent or the DB is unreachable the push is skipped/fails
+# quickly and we still launch the Next.js server within a few seconds.
+if [ -n "$DATABASE_URL" ]; then
+  echo ""
+  echo ">>> Running prisma db push (max 25s)..."
+  if timeout 25 node ./node_modules/prisma/build/index.js db push --skip-generate; then
+    echo ">>> Prisma schema is up to date"
+  else
+    echo ">>> WARNING: prisma db push failed — starting server anyway"
   fi
-  echo ">>> Prisma db push failed (attempt $ATTEMPT/10) — retrying in ${DELAY}s..."
-  sleep "$DELAY"
-  ATTEMPT=$((ATTEMPT + 1))
-  DELAY=$((DELAY * 2))
-done
-
-if [ "$DB_PUSH_OK" -eq 0 ]; then
-  echo ">>> WARNING: Prisma db push failed after 10 attempts."
-  echo ">>>          Starting Next.js server anyway — DB-dependent routes will"
-  echo ">>>          return errors until the database is reachable."
+else
+  echo ">>> DATABASE_URL not set — skipping prisma db push"
 fi
 
 echo ""
