@@ -1,12 +1,15 @@
-/**
- * Application settings — persisted in the `settings` table as key-value pairs.
- *
- * Call getSettings() anywhere on the server to read the current configuration.
- * The settings page writes via POST /api/settings which calls saveSettings().
- *
- * All settings have sensible defaults so the app works out-of-the-box without
- * any DB rows.
- */
+// Anzu Dynamics — Application Settings (multi-tenant)
+// Persists key-value configuration in the `settings` table, scoped by organizationId.
+//
+// Resolution order (most-specific wins):
+//   1. Tenant-specific row:  { organizationId: orgId, key }
+//   2. Global default row:   { organizationId: "default", key }
+//   3. Hard-coded fallback:  SETTING_DEFAULTS[key]
+//
+// Usage:
+//   import { getSettings } from "@/lib/app-settings";
+//   const settings = await getSettings(orgId);         // tenant-scoped
+//   const settings = await getSettings();              // global fallback only
 
 import { prisma } from "./prisma";
 
@@ -26,7 +29,7 @@ export interface AppSettings {
   // ── Extraction behaviour ─────────────────────────────────────────────────
   /** Fields below this confidence score trigger a low_confidence flag (0.50–0.95) */
   low_confidence_threshold: number;
-  /** GPT-4o-mini API call timeout in seconds (10–60) */
+  /** Extraction call timeout in seconds (10–60) */
   extraction_timeout_seconds: number;
   /**
    * If every core field is ≥ this value, auto-set status to "reviewed".
@@ -45,11 +48,11 @@ export interface AppSettings {
   finetune_model_id: string | null;
 
   // ── Field selection ───────────────────────────────────────────────────────
-  /**
-   * List of field keys to include in extraction.
-   * When empty or omitted, all fields are extracted.
-   */
   extraction_fields: string[];
+
+  // ── ERP preference ────────────────────────────────────────────────────────
+  /** Preferred ERP type set during onboarding: "sinco" | "siigo" | "sap_b1" | "contpaq" | "other" */
+  preferred_erp: string | null;
 }
 
 // ── All extractable field keys ─────────────────────────────────────────────────
@@ -74,6 +77,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   flag_duplicates:            true,
   finetune_model_id:          null,
   extraction_fields:          [...ALL_EXTRACTION_FIELDS],
+  preferred_erp:              null,
 };
 
 // ── Country → default currency map ────────────────────────────────────────────
@@ -94,13 +98,35 @@ export const COUNTRY_CURRENCY: Record<string, string> = {
 
 // ── Read ───────────────────────────────────────────────────────────────────────
 
-export async function getSettings(): Promise<AppSettings> {
-  const rows = await prisma.setting.findMany();
-  const map: Record<string, string> = Object.fromEntries(
-    rows.map((r) => [r.key, r.value])
-  );
+/**
+ * Loads settings for the given organization with a 3-level fallback:
+ *   org-specific → "default" global row → SETTING_DEFAULTS hard-coded values.
+ *
+ * @param organizationId  Clerk org ID. Pass null/undefined for global-only lookup.
+ */
+export async function getSettings(organizationId?: string | null): Promise<AppSettings> {
+  // Load all rows matching either this org or the "default" global org
+  const orgsToQuery = ["default"];
+  if (organizationId) orgsToQuery.push(organizationId);
 
-  const get = (key: keyof AppSettings) => map[key] ?? undefined;
+  const rows = await prisma.setting.findMany({
+    where: { organizationId: { in: orgsToQuery } },
+  });
+
+  // Build a merged map: org-specific values win over "default"
+  const map: Record<string, string> = {};
+  // Apply "default" rows first
+  for (const row of rows) {
+    if (row.organizationId === "default") map[row.key] = row.value;
+  }
+  // Apply org-specific rows second (overwrite defaults)
+  if (organizationId) {
+    for (const row of rows) {
+      if (row.organizationId === organizationId) map[row.key] = row.value;
+    }
+  }
+
+  const get = (key: string): string | undefined => map[key];
 
   return {
     default_country:  get("default_country")  ?? SETTING_DEFAULTS.default_country,
@@ -143,22 +169,31 @@ export async function getSettings(): Promise<AppSettings> {
         return SETTING_DEFAULTS.extraction_fields;
       }
     })(),
+
+    preferred_erp: get("preferred_erp") ?? SETTING_DEFAULTS.preferred_erp,
   };
 }
 
 // ── Write ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Persists settings for the given organization.
+ *
+ * @param partial         Key-value map of settings to update (string values only)
+ * @param organizationId  Clerk org ID. Defaults to "default" (global settings).
+ */
 export async function saveSettings(
-  partial: Partial<Record<string, string>>
+  partial: Partial<Record<string, string>>,
+  organizationId: string = "default"
 ): Promise<void> {
   await Promise.all(
     Object.entries(partial)
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
       .map(([key, value]) =>
         prisma.setting.upsert({
-          where: { key },
+          where: { organizationId_key: { organizationId, key } },
           update: { value },
-          create: { key, value },
+          create: { organizationId, key, value },
         })
       )
   );
