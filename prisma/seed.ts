@@ -67,7 +67,7 @@ async function main() {
   // ── 2. Projects ───────────────────────────────────────────────────────────
   const [proyA, proyB, proyC] = await Promise.all([
     prisma.project.upsert({
-      where: { code: "PROY-2025-HQ" },
+      where: { id: "project-hq-001" },
       update: {},
       create: {
         id: "project-hq-001",
@@ -86,7 +86,7 @@ async function main() {
       },
     }),
     prisma.project.upsert({
-      where: { code: "PROY-2025-MED" },
+      where: { id: "project-med-001" },
       update: {},
       create: {
         id: "project-med-001",
@@ -105,7 +105,7 @@ async function main() {
       },
     }),
     prisma.project.upsert({
-      where: { code: "PROY-2025-CAL" },
+      where: { id: "project-cal-001" },
       update: {},
       create: {
         id: "project-cal-001",
@@ -128,7 +128,7 @@ async function main() {
   // ── 3. Purchase Orders ────────────────────────────────────────────────────
   const [po1, po2, po3, po4] = await Promise.all([
     prisma.purchaseOrder.upsert({
-      where: { poNumber: "OC-2025-001" },
+      where: { id: "po-001" },
       update: {},
       create: {
         id: "po-001",
@@ -147,7 +147,7 @@ async function main() {
       },
     }),
     prisma.purchaseOrder.upsert({
-      where: { poNumber: "OC-2025-002" },
+      where: { id: "po-002" },
       update: {},
       create: {
         id: "po-002",
@@ -166,7 +166,7 @@ async function main() {
       },
     }),
     prisma.purchaseOrder.upsert({
-      where: { poNumber: "OC-2025-003" },
+      where: { id: "po-003" },
       update: {},
       create: {
         id: "po-003",
@@ -185,7 +185,7 @@ async function main() {
       },
     }),
     prisma.purchaseOrder.upsert({
-      where: { poNumber: "OC-2025-004" },
+      where: { id: "po-004" },
       update: {},
       create: {
         id: "po-004",
