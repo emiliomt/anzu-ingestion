@@ -7,7 +7,7 @@ const THRESHOLD_KEY = "petty_cash_threshold";
 const DEFAULT_THRESHOLD = 400000;
 
 export async function GET() {
-  const setting = await prisma.setting.findUnique({ where: { key: THRESHOLD_KEY } });
+  const setting = await prisma.setting.findUnique({ where: { organizationId_key: { organizationId: "default", key: THRESHOLD_KEY } } });
   return NextResponse.json({ threshold: setting ? Number(setting.value) : DEFAULT_THRESHOLD });
 }
 
@@ -17,9 +17,9 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "invalid threshold" }, { status: 400 });
   }
   await prisma.setting.upsert({
-    where: { key: THRESHOLD_KEY },
+    where: { organizationId_key: { organizationId: "default", key: THRESHOLD_KEY } },
     update: { value: String(threshold) },
-    create: { key: THRESHOLD_KEY, value: String(threshold) },
+    create: { organizationId: "default", key: THRESHOLD_KEY, value: String(threshold) },
   });
   return NextResponse.json({ threshold });
 }

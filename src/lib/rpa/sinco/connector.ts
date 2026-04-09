@@ -27,8 +27,8 @@ export class SincoConnector extends BaseErpConnector {
   async login(): Promise<void> {
     // Dynamic import — playwright is a devDependency that must be installed
     // in the worker environment: npm install playwright
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { chromium } = require("playwright") as typeof import("playwright");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    const { chromium } = require("playwright") as any;
 
     const baseUrl = this.credentials.baseUrl;
     if (!baseUrl) throw new Error("SINCO baseUrl is required in credential data");
@@ -99,7 +99,7 @@ export class SincoConnector extends BaseErpConnector {
     // Fill total amount
     if (payload.totalAmount) {
       const totalField = await this.page.$('#txtTotal, input[name="total"], [data-field="total"]');
-      const numericTotal = parseFloat(payload.totalAmount.replace(/[^0-9.]/g, ""));
+      const numericTotal = parseFloat(payload.totalAmount!.replace(/[^0-9.]/g, ""));
       if (totalField && !isNaN(numericTotal)) {
         await totalField.fill(String(numericTotal));
       }
