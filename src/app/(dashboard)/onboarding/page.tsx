@@ -343,7 +343,7 @@ export default function OnboardingPage() {
 
               {/* Clerk org creation widget */}
               <CreateOrganization
-                afterCreateOrganizationUrl="/dashboard/onboarding"
+                afterCreateOrganizationUrl="/onboarding"
                 appearance={{
                   variables: {
                     colorPrimary: "#F97316",
