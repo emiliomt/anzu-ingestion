@@ -1,6 +1,7 @@
 // Anzu Dynamics — Sign-In Page
 // Clerk-managed authentication. Supports email/password, Google, magic links.
-// After sign-in, redirects to /dashboard/onboarding (first time) or /admin.
+// After sign-in, fallback redirect is /onboarding (new users) or /admin (existing).
+// Note: the (dashboard) route group does NOT add a /dashboard URL prefix.
 
 import { SignIn } from "@clerk/nextjs";
 
@@ -29,6 +30,7 @@ export default function SignInPage() {
 
       {/* Clerk sign-in widget */}
       <SignIn
+        fallbackRedirectUrl="/onboarding"
         appearance={{
           variables: {
             colorPrimary: "#F97316",

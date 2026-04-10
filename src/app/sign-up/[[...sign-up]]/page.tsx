@@ -29,6 +29,7 @@ export default function SignUpPage() {
 
       {/* Clerk sign-up widget */}
       <SignUp
+        fallbackRedirectUrl="/onboarding"
         appearance={{
           variables: {
             colorPrimary: "#F97316",
