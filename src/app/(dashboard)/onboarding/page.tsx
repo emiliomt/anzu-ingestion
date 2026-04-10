@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useOrganization, useOrganizationList, CreateOrganization } from "@clerk/nextjs";
+import type { SetActive } from "@clerk/types";
 import { Building2, Globe, Zap, CheckCircle2, ArrowRight, ChevronRight } from "lucide-react";
 
 const ERP_OPTIONS = [
@@ -233,14 +234,26 @@ function StepQuickStart({ onFinish }: { onFinish: () => void }) {
 export default function OnboardingPage() {
   const router = useRouter();
   const { organization } = useOrganization();
+  const { userMemberships, isLoaded, setActive } = useOrganizationList({ userMemberships: true });
   const [step, setStep] = useState<1 | 2 | 3>(organization ? 2 : 1);
   const [config, setConfig] = useState<{ country: string; erp: string } | null>(null);
+  const [activating, setActivating] = useState(false);
 
   // If user already has an active org, skip step 1
   const effectiveStep = organization && step === 1 ? 2 : step;
+  const memberships = userMemberships?.data ?? [];
 
-  const handleOrgCreated = () => {
-    setStep(2);
+  const handleOrgCreated = () => setStep(2);
+
+  // Activate an existing org and proceed to step 2
+  const handleActivateExisting = async (orgId: string) => {
+    setActivating(true);
+    try {
+      await (setActive as SetActive)({ organization: orgId });
+      setStep(2);
+    } finally {
+      setActivating(false);
+    }
   };
 
   const handleConfigure = async (data: { country: string; erp: string }) => {
@@ -359,14 +372,30 @@ export default function OnboardingPage() {
                 }}
               />
 
-              {/* Manual skip if org was already created */}
-              {organization && (
-                <button
-                  onClick={handleOrgCreated}
-                  className="w-full text-sm text-orange-600 hover:underline py-2"
-                >
-                  Continuar con &quot;{organization.name}&quot; →
-                </button>
+              {/* Activate an existing org if user already has one */}
+              {isLoaded && memberships.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 mb-2 text-center">O continúa con una organización existente:</p>
+                  <div className="space-y-2">
+                    {memberships.map((m) => (
+                      <button
+                        key={m.organization.id}
+                        onClick={() => handleActivateExisting(m.organization.id)}
+                        disabled={activating}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors text-left disabled:opacity-60"
+                      >
+                        <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                          {m.organization.name.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-sm font-medium text-orange-900 flex-1">{m.organization.name}</span>
+                        {activating
+                          ? <div className="w-3 h-3 border border-orange-500 border-t-transparent rounded-full animate-spin" />
+                          : <ChevronRight className="w-3 h-3 text-orange-400" />
+                        }
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}

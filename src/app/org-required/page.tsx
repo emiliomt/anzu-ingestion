@@ -5,18 +5,32 @@
 
 "use client";
 
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useOrganizationList } from "@clerk/nextjs";
-import { Building2, Plus, Users, ArrowRight } from "lucide-react";
+import { Building2, Plus, ArrowRight } from "lucide-react";
 import { Suspense } from "react";
 
 function OrgRequiredContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("return_to") ?? "/admin";
-  const { userMemberships, isLoaded } = useOrganizationList({ userMemberships: true });
+  const [activating, setActivating] = useState<string | null>(null);
+  const { userMemberships, isLoaded, setActive } = useOrganizationList({ userMemberships: true });
 
-  const hasOrgs = isLoaded && (userMemberships?.count ?? 0) > 0;
+  const memberships = userMemberships?.data ?? [];
+  const hasOrgs = isLoaded && memberships.length > 0;
+
+  const handleSelect = async (orgId: string) => {
+    if (!setActive) return;
+    setActivating(orgId);
+    try {
+      await setActive({ organization: orgId });
+      router.push(returnTo);
+    } catch {
+      setActivating(null);
+    }
+  };
 
   return (
     <div
@@ -39,46 +53,47 @@ function OrgRequiredContent() {
           Se requiere una organización
         </h1>
         <p className="text-sm text-gray-500 mb-8 leading-relaxed">
-          Para acceder al dashboard de Anzu necesitas pertenecer a una organización
-          (empresa cliente). Crea una nueva o únete a una existente.
+          Para acceder al dashboard de Anzu necesitas pertenecer a una organización.
+          {hasOrgs ? " Selecciona una de tus organizaciones:" : " Crea una nueva para continuar."}
         </p>
 
         <div className="space-y-3">
+          {/* Existing orgs — shown first if available */}
+          {hasOrgs && memberships.map((m) => (
+            <button
+              key={m.organization.id}
+              onClick={() => handleSelect(m.organization.id)}
+              disabled={activating !== null}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-orange-500 bg-orange-50 text-left hover:bg-orange-100 transition-colors disabled:opacity-60"
+            >
+              <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center shrink-0 text-white font-bold text-sm">
+                {m.organization.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-orange-900">{m.organization.name}</div>
+                <div className="text-xs text-orange-700">Tu rol: {m.role}</div>
+              </div>
+              {activating === m.organization.id
+                ? <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                : <ArrowRight className="w-4 h-4 text-orange-500" />
+              }
+            </button>
+          ))}
+
           {/* Create new org */}
           <button
             onClick={() => router.push("/onboarding")}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-orange-500 bg-orange-50 text-left hover:bg-orange-100 transition-colors"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 bg-white text-left hover:bg-gray-50 transition-colors"
           >
-            <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center shrink-0">
-              <Plus className="w-4 h-4 text-white" />
+            <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+              <Plus className="w-4 h-4 text-gray-600" />
             </div>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-orange-900">Crear nueva organización</div>
-              <div className="text-xs text-orange-700">Para tu empresa o equipo</div>
+              <div className="text-sm font-semibold text-gray-900">Crear nueva organización</div>
+              <div className="text-xs text-gray-500">Para tu empresa o equipo</div>
             </div>
-            <ArrowRight className="w-4 h-4 text-orange-500" />
+            <ArrowRight className="w-4 h-4 text-gray-400" />
           </button>
-
-          {/* Switch to existing org if user has memberships */}
-          {hasOrgs && (
-            <button
-              onClick={() => router.push("/admin")}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 bg-white text-left hover:bg-gray-50 transition-colors"
-            >
-              <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4 text-gray-600" />
-              </div>
-              <div className="flex-1">
-                <div className="text-sm font-semibold text-gray-900">
-                  Seleccionar organización existente
-                </div>
-                <div className="text-xs text-gray-500">
-                  Tienes {userMemberships?.count} membresía{userMemberships?.count !== 1 ? "s" : ""}
-                </div>
-              </div>
-              <ArrowRight className="w-4 h-4 text-gray-400" />
-            </button>
-          )}
         </div>
 
         <p className="text-xs text-gray-400 mt-6">
