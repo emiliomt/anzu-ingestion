@@ -67,8 +67,8 @@ function getClient(): OpenAI {
   return _client;
 }
 
-const OCR_MODEL       = "gpt-4o";       // vision — needed for image/PDF OCR
-const EXTRACT_MODEL   = "gpt-4o-mini";  // text-only — cheap structured extraction
+const OCR_MODEL       = "gpt-4o";                    // vision — needed for image/PDF OCR
+const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap structured extraction
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
