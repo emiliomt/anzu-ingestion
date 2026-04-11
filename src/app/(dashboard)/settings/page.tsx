@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Plus, Trash2, Pencil, Wifi, WifiOff, Loader2, Save, KeyRound, Settings2, CreditCard,
+  ExternalLink, ChevronRight, Sparkles,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -722,9 +723,40 @@ const PLAN_LABELS: Record<string, string> = {
   demo: "Demo", starter: "Starter", growth: "Growth", enterprise: "Enterprise",
 };
 
+const UPGRADE_PLANS = [
+  {
+    id: "starter" as const,
+    name: "Starter",
+    price: "$990/mo",
+    invoices: "500 invoices/month",
+    features: ["1 user", "Email & web capture", "Basic OCR + AI", "1 ERP integration"],
+  },
+  {
+    id: "growth" as const,
+    name: "Growth",
+    price: "$2,490/mo",
+    invoices: "3,000 invoices/month",
+    features: ["10 users", "WhatsApp + API webhooks", "Advanced LLM extraction", "1 RPA connector", "Multi-level approvals"],
+    highlight: true,
+  },
+];
+
 function BillingTab() {
-  const [info, setInfo]     = useState<TenantInfo>({});
-  const [loading, setLoading] = useState(true);
+  const [info, setInfo]           = useState<TenantInfo>({});
+  const [loading, setLoading]     = useState(true);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+
+  useEffect(() => {
+    // Show success toast if redirected back from Stripe
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") === "success") {
+      // Reload page to reflect updated plan
+      window.history.replaceState({}, "", "/settings?tab=billing");
+    }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -733,6 +765,38 @@ function BillingTab() {
       setLoading(false);
     })();
   }, []);
+
+  async function handleCheckout(plan: "starter" | "growth") {
+    setCheckingOut(plan);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ plan }),
+      });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Failed to start checkout");
+      window.location.href = data.url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Checkout failed");
+      setCheckingOut(null);
+    }
+  }
+
+  async function handlePortal() {
+    setPortalLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Failed to open billing portal");
+      window.location.href = data.url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not open portal");
+      setPortalLoading(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -746,13 +810,38 @@ function BillingTab() {
   const quota = PLAN_QUOTAS[plan] ?? 25;
   const used  = info.invoicesThisMonth ?? 0;
   const pct   = quota === Infinity ? 0 : Math.min(100, Math.round((used / quota) * 100));
+  const isPaid = plan !== "demo";
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle>Current Plan</CardTitle>
-          <CardDescription>Your organization&apos;s subscription details.</CardDescription>
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle>Current Plan</CardTitle>
+              <CardDescription>Your organization&apos;s subscription details.</CardDescription>
+            </div>
+            {isPaid && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handlePortal()}
+                disabled={portalLoading}
+              >
+                {portalLoading
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  : <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                }
+                Manage Billing
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">
@@ -768,7 +857,7 @@ function BillingTab() {
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Invoices this month</span>
               <span className="font-medium text-gray-900">
-                {used} / {quota === Infinity ? "Unlimited" : quota}
+                {used} / {quota === Infinity ? "Unlimited" : quota.toLocaleString()}
               </span>
             </div>
             {quota !== Infinity && (
@@ -794,17 +883,74 @@ function BillingTab() {
         </CardContent>
       </Card>
 
-      {plan === "demo" && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardContent className="pt-6">
-            <p className="text-sm text-orange-800 font-medium mb-1">
-              You&apos;re on the Demo plan (25 invoices/month).
-            </p>
-            <p className="text-sm text-orange-700 mb-4">
-              Upgrade to process more invoices, unlock fine-tuning, and access priority support.
-            </p>
-            <Button size="sm">Upgrade Plan</Button>
-          </CardContent>
+      {/* Upgrade card — shown for demo plan or when upgrade flow is open */}
+      {!isPaid && (
+        <Card className={showUpgrade ? "border-orange-300" : "border-orange-200 bg-orange-50"}>
+          {!showUpgrade ? (
+            <CardContent className="pt-6">
+              <p className="text-sm text-orange-800 font-medium mb-1">
+                You&apos;re on the Demo plan (25 invoices/month).
+              </p>
+              <p className="text-sm text-orange-700 mb-4">
+                Upgrade to process more invoices, unlock fine-tuning, and get priority support. 30-day free trial — no credit card charged until the trial ends.
+              </p>
+              <Button size="sm" onClick={() => setShowUpgrade(true)} className="gap-1.5">
+                <Sparkles className="h-3.5 w-3.5" /> Upgrade Plan
+              </Button>
+            </CardContent>
+          ) : (
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-semibold text-gray-900">Choose a plan — 30-day free trial</p>
+                <button
+                  onClick={() => setShowUpgrade(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4">
+                {UPGRADE_PLANS.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`rounded-xl border-2 p-4 ${
+                      p.highlight ? "border-orange-400 bg-orange-50" : "border-gray-200 bg-white"
+                    }`}
+                  >
+                    {p.highlight && (
+                      <span className="inline-block text-xs font-bold text-orange-600 mb-2">Most popular</span>
+                    )}
+                    <div className="font-semibold text-gray-900 text-sm mb-0.5">{p.name}</div>
+                    <div className="text-lg font-bold text-gray-900 mb-0.5">{p.price}</div>
+                    <div className="text-xs text-gray-500 mb-3">{p.invoices}</div>
+                    <ul className="space-y-1 mb-4">
+                      {p.features.map((f) => (
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <ChevronRight className="h-3 w-3 text-orange-400 shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      variant={p.highlight ? "default" : "outline"}
+                      onClick={() => void handleCheckout(p.id)}
+                      disabled={checkingOut !== null}
+                    >
+                      {checkingOut === p.id
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Redirecting…</>
+                        : "Start free trial"
+                      }
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-3 text-center">
+                No charge until the 30-day trial ends. Cancel anytime.
+              </p>
+            </CardContent>
+          )}
         </Card>
       )}
     </div>

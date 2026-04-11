@@ -3,9 +3,10 @@
 // PATCH /api/tenant — update tenant metadata (admin only)
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireAnyRole, requireAdmin, RoleError } from "@/lib/roles";
+import { checkQuota } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
 
@@ -15,19 +16,14 @@ export async function GET() {
   try {
     const { orgId, userId, role } = await requireAnyRole();
 
-    // Fetch Clerk org details
+    // Fetch Clerk org details, subscription, member count, and quota in parallel
     const client = await clerkClient();
-    const org = await client.organizations.getOrganization({ organizationId: orgId });
-
-    // Fetch subscription from DB (null if on demo/free tier)
-    const subscription = await prisma.subscription.findUnique({
-      where: { organizationId: orgId },
-    });
-
-    // Fetch member count
-    const memberships = await client.organizations.getOrganizationMembershipList({
-      organizationId: orgId,
-    });
+    const [org, subscription, memberships, quota] = await Promise.all([
+      client.organizations.getOrganization({ organizationId: orgId }),
+      prisma.subscription.findUnique({ where: { organizationId: orgId } }),
+      client.organizations.getOrganizationMembershipList({ organizationId: orgId }),
+      checkQuota(orgId),
+    ]);
 
     return NextResponse.json({
       organization: {
@@ -38,6 +34,7 @@ export async function GET() {
         createdAt:   org.createdAt,
         memberCount: memberships.totalCount,
       },
+      invoicesThisMonth: quota.used,
       subscription: subscription
         ? {
             plan:            subscription.plan,
