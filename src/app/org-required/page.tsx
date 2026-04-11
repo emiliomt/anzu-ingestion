@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useOrganizationList } from "@clerk/nextjs";
+import { useOrganizationList, useClerk } from "@clerk/nextjs";
 import { Building2, Plus, ArrowRight } from "lucide-react";
 import { Suspense } from "react";
 
@@ -16,13 +16,14 @@ function OrgRequiredContent() {
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("return_to") ?? "/admin";
   const [activating, setActivating] = useState<string | null>(null);
-  const { userMemberships, isLoaded, setActive } = useOrganizationList({ userMemberships: true });
+  // useClerk().setActive is always defined; useOrganizationList's setActive can be undefined
+  const { setActive } = useClerk();
+  const { userMemberships, isLoaded } = useOrganizationList({ userMemberships: true });
 
   const memberships = userMemberships?.data ?? [];
   const hasOrgs = isLoaded && memberships.length > 0;
 
   const handleSelect = async (orgId: string) => {
-    if (!setActive) return;
     setActivating(orgId);
     try {
       await setActive({ organization: orgId });
