@@ -27,7 +27,6 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [email, setEmail] = useState(prefilledEmail);
-  const [name, setName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successRefs, setSuccessRefs] = useState<string[]>([]);
@@ -49,7 +48,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
         file: f,
         id: Math.random().toString(36).slice(2),
         status: "pending",
-        // ZIP files have a separate 50 MB server-side limit — skip client-side 20 MB check for them
+        // ZIP files have a separate 200 MB server-side limit — skip client-side 20 MB check for them
         error:
           f.size > MAX_SIZE && !f.type.includes("zip")
             ? "File exceeds 20 MB limit"
@@ -66,15 +65,16 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
+      if (requireVendorSelection && !selectedVendor) return; // drop zone is locked
       addFiles(e.dataTransfer.files);
     },
-    [addFiles]
+    [addFiles, requireVendorSelection, selectedVendor]
   );
 
   // Debounced vendor search
   const handleVendorInput = useCallback((value: string) => {
     setVendorQuery(value);
-    setSelectedVendor(null); // clear selection whenever the user types again
+    setSelectedVendor(null);
 
     if (vendorDebounceRef.current) clearTimeout(vendorDebounceRef.current);
 
@@ -109,11 +109,9 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
 
     const formData = new FormData();
     if (email) formData.append("email", email);
-    // Send structured vendorId when selected; fall back to free-text name otherwise
+    // Send structured vendorId when selected
     if (selectedVendor) {
       formData.append("vendorId", selectedVendor.id);
-    } else if (name) {
-      formData.append("name", name);
     }
     validFiles.forEach((f) => formData.append("files", f.file));
 
@@ -147,7 +145,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
             };
           }
 
-          // ZIP file: the extracted entries have different names — collect all received refs
+          // ZIP file: extracted entries have different names — collect all received refs
           const isZip = f.file.name.toLowerCase().endsWith(".zip");
           if (isZip) {
             const zipReceived = data.results.filter((r) => r.status === "received");
@@ -211,7 +209,6 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
             setSubmitted(false);
             setSuccessRefs([]);
             setEmail("");
-            setName("");
             setSelectedVendor(null);
             setVendorQuery("");
             setVendorResults([]);
@@ -223,20 +220,85 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
     );
   }
 
+  const dropZoneLocked = requireVendorSelection && !selectedVendor;
+
   return (
     <div className="space-y-4">
-      {/* Drop zone */}
+
+      {/* ── Step 1: Vendor picker (always visible when requireVendorSelection) ── */}
+      {requireVendorSelection && (
+        <div className="card p-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-800">
+            Step 1 — Select your company <span className="text-red-500">*</span>
+          </p>
+
+          {selectedVendor ? (
+            <div className="flex items-center gap-2 px-3 py-2.5 border border-indigo-300 rounded-lg bg-indigo-50">
+              <Building2 className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+              <span className="text-sm font-medium text-indigo-800 flex-1 truncate">{selectedVendor.name}</span>
+              <button
+                type="button"
+                onClick={() => { setSelectedVendor(null); setVendorQuery(""); setVendorResults([]); }}
+                className="text-indigo-400 hover:text-indigo-600 flex-shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search for your company name…"
+                  value={vendorQuery}
+                  onChange={(e) => handleVendorInput(e.target.value)}
+                  className="input pl-9"
+                  autoComplete="organization"
+                />
+                {vendorSearching && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                )}
+              </div>
+              {vendorResults.length > 0 && (
+                <ul className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {vendorResults.map((v) => (
+                    <li key={v.id}>
+                      <button
+                        type="button"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                        onClick={() => { setSelectedVendor(v); setVendorQuery(v.name); setVendorResults([]); }}
+                      >
+                        {v.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {vendorQuery.length >= 2 && !vendorSearching && vendorResults.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1.5 pl-1">
+                  No matching company found. Contact your buyer to be added to the system.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 2 (or Step 1 for admins): Drop zone ──────────────────────────── */}
       <div
-        onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragEnter={(e) => { e.preventDefault(); if (!dropZoneLocked) setIsDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); if (!dropZoneLocked) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => { if (!dropZoneLocked) fileInputRef.current?.click(); }}
         className={`
-          border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all
-          ${isDragging
-            ? "border-indigo-500 bg-indigo-50"
-            : "border-gray-200 bg-white hover:border-indigo-300 hover:bg-gray-50"
+          border-2 border-dashed rounded-xl p-10 text-center transition-all
+          ${dropZoneLocked
+            ? "border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed"
+            : isDragging
+              ? "border-indigo-500 bg-indigo-50 cursor-pointer"
+              : "border-gray-200 bg-white hover:border-indigo-300 hover:bg-gray-50 cursor-pointer"
           }
         `}
       >
@@ -249,14 +311,27 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
           onChange={(e) => e.target.files && addFiles(e.target.files)}
         />
         <div className="w-14 h-14 bg-indigo-50 rounded-xl flex items-center justify-center mx-auto mb-4">
-          <Upload className="w-7 h-7 text-indigo-600" />
+          <Upload className={`w-7 h-7 ${dropZoneLocked ? "text-gray-400" : "text-indigo-600"}`} />
         </div>
-        <p className="text-base font-medium text-gray-700 mb-1">
-          Drop invoices here or <span className="text-indigo-600">browse</span>
-        </p>
-        <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file (200 MB for ZIP) · Up to 10 files
-        </p>
+        {dropZoneLocked ? (
+          <>
+            <p className="text-base font-medium text-gray-400 mb-1">
+              {requireVendorSelection ? "Select your company above first" : "Drop invoices here or browse"}
+            </p>
+            <p className="text-sm text-gray-300">
+              PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file (200 MB for ZIP) · Up to 10 files
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-base font-medium text-gray-700 mb-1">
+              {requireVendorSelection ? "Step 2 — " : ""}Drop invoices here or <span className="text-indigo-600">browse</span>
+            </p>
+            <p className="text-sm text-gray-400">
+              PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file (200 MB for ZIP) · Up to 10 files
+            </p>
+          </>
+        )}
       </div>
 
       {/* File list */}
@@ -293,95 +368,19 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
         </ul>
       )}
 
-      {/* Provider info */}
+      {/* Email (optional) — shown after files are added */}
       {files.length > 0 && (
         <div className="card p-4 space-y-3">
           <p className="text-sm font-medium text-gray-700">
-            {requireVendorSelection ? "Identify your company" : "Contact info for confirmation (optional)"}
+            Contact info for confirmation (optional)
           </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Vendor selector (required) or free-text name (optional) */}
-            {requireVendorSelection ? (
-              <div className="relative">
-                <label className="block text-xs font-medium text-gray-500 mb-1">
-                  Your company <span className="text-red-500">*</span>
-                </label>
-                {selectedVendor ? (
-                  <div className="flex items-center gap-2 px-3 py-2 border border-indigo-300 rounded-lg bg-indigo-50">
-                    <Building2 className="w-4 h-4 text-indigo-500 flex-shrink-0" />
-                    <span className="text-sm font-medium text-indigo-800 flex-1 truncate">{selectedVendor.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedVendor(null); setVendorQuery(""); setVendorResults([]); }}
-                      className="text-indigo-400 hover:text-indigo-600 flex-shrink-0"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                      <input
-                        type="text"
-                        placeholder="Search for your company name…"
-                        value={vendorQuery}
-                        onChange={(e) => handleVendorInput(e.target.value)}
-                        className="input pl-9"
-                      />
-                      {vendorSearching && (
-                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
-                      )}
-                    </div>
-                    {vendorResults.length > 0 && (
-                      <ul className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                        {vendorResults.map((v) => (
-                          <li key={v.id}>
-                            <button
-                              type="button"
-                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                              onClick={() => { setSelectedVendor(v); setVendorQuery(v.name); setVendorResults([]); }}
-                            >
-                              {v.name}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {vendorQuery.length >= 2 && !vendorSearching && vendorResults.length === 0 && (
-                      <p className="text-xs text-gray-400 mt-1 pl-1">
-                        No matching company found. Contact your buyer to be added to the system.
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : (
-              <input
-                type="text"
-                placeholder="Your name or company"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="input"
-              />
-            )}
-
-            <input
-              type="email"
-              placeholder="Email for confirmation"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="input"
-            />
-          </div>
-
-          {requireVendorSelection && !selectedVendor && files.some((f) => f.status === "pending" && !f.error) && (
-            <p className="text-xs text-amber-600 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-              Select your company above to enable submission
-            </p>
-          )}
+          <input
+            type="email"
+            placeholder="Email for confirmation"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="input"
+          />
         </div>
       )}
 
