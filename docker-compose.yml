@@ -74,6 +74,30 @@ services:
       redis:
         condition: service_healthy
 
+  # ── BullMQ background workers (OCR + RPA) ────────────────────────────────────
+  workers:
+    build:
+      context: .
+      dockerfile: Dockerfile.workers
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://anzu:anzupassword@postgres:5432/anzuingestion
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_PATH: /app/uploads
+      VAULT_KEY: ${VAULT_KEY:-}
+      NODE_ENV: production
+      PLAYWRIGHT_ENABLED: ${PLAYWRIGHT_ENABLED:-false}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   # ── anzu-security — Python FastAPI microservice (optional) ───────────────────
   # Remove this service if not using the SAT EFOS blacklist checker.
   security:
