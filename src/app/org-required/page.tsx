@@ -27,21 +27,16 @@ function OrgRequiredContent() {
   const hasOrgs = isLoaded && memberships.length > 0;
 
   const handleSelect = async (orgId: string) => {
-    if (!clerk.loaded) {
-      setError("Clerk session not ready yet. Please wait a moment and try again.");
-      return;
-    }
     setActivating(orgId);
     setError(null);
     try {
       await clerk.setActive({ organization: orgId });
-      // Small delay to allow Clerk to write the updated session cookie before
-      // the hard navigation — avoids a race where the server middleware still
-      // sees the old orgId=null token.
-      await new Promise((r) => setTimeout(r, 300));
-      // Hard navigation refreshes the server-side Clerk session.
-      // router.push() keeps the old token; window.location.href forces a full reload.
-      window.location.href = returnTo;
+      // router.refresh() tells Next.js to re-fetch server data with the fresh
+      // Clerk cookie (orgId now set). router.push() then navigates; the
+      // middleware will see the updated session and allow the request through.
+      // window.location.href races against Clerk writing the cookie and fails.
+      router.refresh();
+      router.push(returnTo);
     } catch (err) {
       console.error("[org-required] setActive error:", err);
       setError(
