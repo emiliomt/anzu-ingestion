@@ -250,7 +250,8 @@ export default function OnboardingPage() {
     setActivating(true);
     try {
       await (setActive as SetActive)({ organization: orgId });
-      setStep(2);
+      // Hard navigation to force fresh server-side session
+      window.location.href = "/admin";
     } finally {
       setActivating(false);
     }

@@ -26,7 +26,9 @@ function OrgRequiredContent() {
     setActivating(orgId);
     try {
       await setActive({ organization: orgId });
-      router.push(returnTo);
+      // Hard navigation so the server-side Clerk session is fully refreshed
+      // before the middleware checks orgId — router.push reuses the old session.
+      window.location.href = returnTo;
     } catch {
       setActivating(null);
     }
