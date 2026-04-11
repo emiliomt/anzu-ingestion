@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, Search, Building2 } from "lucide-react";
 
 interface UploadFile {
   file: File;
@@ -15,13 +15,15 @@ interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
   prefilledEmail?: string;
+  /** When true, vendor must select their company before uploading (used for unauthenticated portal) */
+  requireVendorSelection?: boolean;
 }
 
-const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp";
+const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp,.zip";
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 10;
 
-export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendorSelection = false }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [email, setEmail] = useState(prefilledEmail);
@@ -29,6 +31,14 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
   const [isUploading, setIsUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successRefs, setSuccessRefs] = useState<string[]>([]);
+
+  // Vendor selection state
+  const [vendorQuery, setVendorQuery] = useState("");
+  const [vendorResults, setVendorResults] = useState<{ id: string; name: string }[]>([]);
+  const [selectedVendor, setSelectedVendor] = useState<{ id: string; name: string } | null>(null);
+  const [vendorSearching, setVendorSearching] = useState(false);
+  const vendorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
@@ -39,8 +49,11 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
         file: f,
         id: Math.random().toString(36).slice(2),
         status: "pending",
+        // ZIP files have a separate 50 MB server-side limit — skip client-side 20 MB check for them
         error:
-          f.size > MAX_SIZE ? "File exceeds 20 MB limit" : undefined,
+          f.size > MAX_SIZE && !f.type.includes("zip")
+            ? "File exceeds 20 MB limit"
+            : undefined,
       }));
     setFiles((prev) => [...prev, ...mapped]);
   }, [files.length]);
@@ -58,6 +71,36 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
     [addFiles]
   );
 
+  // Debounced vendor search
+  const handleVendorInput = useCallback((value: string) => {
+    setVendorQuery(value);
+    setSelectedVendor(null); // clear selection whenever the user types again
+
+    if (vendorDebounceRef.current) clearTimeout(vendorDebounceRef.current);
+
+    if (value.trim().length < 2) {
+      setVendorResults([]);
+      return;
+    }
+
+    vendorDebounceRef.current = setTimeout(async () => {
+      setVendorSearching(true);
+      try {
+        const res = await fetch(`/api/vendors/search?q=${encodeURIComponent(value)}`);
+        const data = await res.json() as { vendors: { id: string; name: string }[] };
+        setVendorResults(data.vendors);
+      } catch {
+        setVendorResults([]);
+      } finally {
+        setVendorSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  const canSubmit =
+    files.some((f) => f.status === "pending" && !f.error) &&
+    (!requireVendorSelection || selectedVendor !== null);
+
   const handleUpload = async () => {
     const validFiles = files.filter((f) => !f.error && f.status === "pending");
     if (validFiles.length === 0) return;
@@ -66,7 +109,12 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
 
     const formData = new FormData();
     if (email) formData.append("email", email);
-    if (name) formData.append("name", name);
+    // Send structured vendorId when selected; fall back to free-text name otherwise
+    if (selectedVendor) {
+      formData.append("vendorId", selectedVendor.id);
+    } else if (name) {
+      formData.append("name", name);
+    }
     validFiles.forEach((f) => formData.append("files", f.file));
 
     try {
@@ -87,6 +135,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
       const refs: string[] = [];
       setFiles((prev) =>
         prev.map((f) => {
+          // Direct filename match (single-file uploads)
           const result = data.results.find((r) => r.fileName === f.file.name);
           if (result) {
             if (result.status === "received") refs.push(result.referenceNo);
@@ -97,6 +146,19 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
               error: result.error,
             };
           }
+
+          // ZIP file: the extracted entries have different names — collect all received refs
+          const isZip = f.file.name.toLowerCase().endsWith(".zip");
+          if (isZip) {
+            const zipReceived = data.results.filter((r) => r.status === "received");
+            zipReceived.forEach((r) => refs.push(r.referenceNo));
+            return {
+              ...f,
+              status: zipReceived.length > 0 ? "success" : "error",
+              error: zipReceived.length === 0 ? "No valid invoice files found in ZIP" : undefined,
+            };
+          }
+
           return f;
         })
       );
@@ -150,6 +212,9 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
             setSuccessRefs([]);
             setEmail("");
             setName("");
+            setSelectedVendor(null);
+            setVendorQuery("");
+            setVendorResults([]);
           }}
         >
           Submit another invoice
@@ -190,7 +255,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB · Up to 10 files
+          PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file · Up to 10 files
         </p>
       </div>
 
@@ -232,16 +297,76 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
       {files.length > 0 && (
         <div className="card p-4 space-y-3">
           <p className="text-sm font-medium text-gray-700">
-            Contact info for confirmation (optional)
+            {requireVendorSelection ? "Identify your company" : "Contact info for confirmation (optional)"}
           </p>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input
-              type="text"
-              placeholder="Your name or company"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="input"
-            />
+            {/* Vendor selector (required) or free-text name (optional) */}
+            {requireVendorSelection ? (
+              <div className="relative">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Your company <span className="text-red-500">*</span>
+                </label>
+                {selectedVendor ? (
+                  <div className="flex items-center gap-2 px-3 py-2 border border-indigo-300 rounded-lg bg-indigo-50">
+                    <Building2 className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                    <span className="text-sm font-medium text-indigo-800 flex-1 truncate">{selectedVendor.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedVendor(null); setVendorQuery(""); setVendorResults([]); }}
+                      className="text-indigo-400 hover:text-indigo-600 flex-shrink-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search for your company name…"
+                        value={vendorQuery}
+                        onChange={(e) => handleVendorInput(e.target.value)}
+                        className="input pl-9"
+                      />
+                      {vendorSearching && (
+                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                      )}
+                    </div>
+                    {vendorResults.length > 0 && (
+                      <ul className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {vendorResults.map((v) => (
+                          <li key={v.id}>
+                            <button
+                              type="button"
+                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                              onClick={() => { setSelectedVendor(v); setVendorQuery(v.name); setVendorResults([]); }}
+                            >
+                              {v.name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {vendorQuery.length >= 2 && !vendorSearching && vendorResults.length === 0 && (
+                      <p className="text-xs text-gray-400 mt-1 pl-1">
+                        No matching company found. Contact your buyer to be added to the system.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <input
+                type="text"
+                placeholder="Your name or company"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="input"
+              />
+            )}
+
             <input
               type="email"
               placeholder="Email for confirmation"
@@ -250,6 +375,13 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
               className="input"
             />
           </div>
+
+          {requireVendorSelection && !selectedVendor && files.some((f) => f.status === "pending" && !f.error) && (
+            <p className="text-xs text-amber-600 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+              Select your company above to enable submission
+            </p>
+          )}
         </div>
       )}
 
@@ -257,8 +389,8 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
       {files.some((f) => f.status === "pending" && !f.error) && (
         <button
           onClick={handleUpload}
-          disabled={isUploading}
-          className="btn-primary w-full justify-center py-3"
+          disabled={isUploading || !canSubmit}
+          className="btn-primary w-full justify-center py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isUploading ? (
             <>

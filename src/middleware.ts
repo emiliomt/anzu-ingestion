@@ -32,7 +32,8 @@ const isPublic = createRouteMatcher([
   "/api/webhooks(.*)",
   // Other public API endpoints
   "/api/status(.*)",
-  "/api/upload",   // unauthenticated vendor upload (email/name in form)
+  "/api/upload",          // unauthenticated vendor upload (email/name in form)
+  "/api/vendors/search",  // public vendor lookup for portal
   "/api/health",
 ]);
 

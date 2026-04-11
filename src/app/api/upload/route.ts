@@ -1,17 +1,19 @@
 // Anzu Dynamics — Invoice Upload API
-// POST /api/upload — accepts multipart form-data with invoice files (PDF/image/XML).
+// POST /api/upload — accepts multipart form-data with invoice files (PDF/image/XML/ZIP).
 // Public route (no auth required) for vendor portal uploads.
 // When called by an authenticated user, injects their organizationId.
 
 import { NextRequest, NextResponse } from "next/server";
+import path from "path";
 import { auth } from "@clerk/nextjs/server";
+import AdmZip from "adm-zip";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
 import { buildFewShotSection } from "@/lib/few-shot";
 import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
-import { generateReferenceNo, isValidMime } from "@/lib/utils";
+import { generateReferenceNo, isValidMime, isZipMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
 
@@ -38,7 +40,98 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if needed
 
 const MAX_FILES = 10;
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB per individual invoice file
+const MAX_ZIP_SIZE = 50 * 1024 * 1024;  // 50 MB for the ZIP archive itself
+const MAX_ZIP_ENTRIES = 20;             // ZIP bomb guard
+
+// ── ZIP extraction helper ──────────────────────────────────────────────────────
+
+interface ExtractedEntry {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+}
+
+function expandZipEntries(zipBuffer: Buffer): {
+  entries: ExtractedEntry[];
+  skipped: string[];
+  error?: string;
+} {
+  let zip: AdmZip;
+  try {
+    zip = new AdmZip(zipBuffer);
+  } catch {
+    return { entries: [], skipped: [], error: "Could not open ZIP — file may be corrupt or password-protected." };
+  }
+
+  const allEntries = zip.getEntries();
+
+  if (allEntries.length === 0) {
+    return { entries: [], skipped: [], error: "ZIP archive is empty." };
+  }
+
+  if (allEntries.length > MAX_ZIP_ENTRIES) {
+    return {
+      entries: [],
+      skipped: [],
+      error: `ZIP contains ${allEntries.length} entries — maximum allowed is ${MAX_ZIP_ENTRIES}.`,
+    };
+  }
+
+  // Map file extensions to MIME types for archive members
+  const extToMime: Record<string, string> = {
+    ".pdf":  "application/pdf",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".heic": "image/heic",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+    ".xml":  "application/xml",
+  };
+
+  const entries: ExtractedEntry[] = [];
+  const skipped: string[] = [];
+
+  for (const entry of allEntries) {
+    // Skip directories and macOS metadata
+    if (entry.isDirectory) continue;
+    const name = entry.entryName;
+    if (
+      name.startsWith("__MACOSX/") ||
+      name.startsWith(".") ||
+      name.endsWith(".DS_Store")
+    ) continue;
+
+    // Derive MIME from file extension (browser can't tell us for archive members)
+    const ext = path.extname(name).toLowerCase();
+    const mimeType = extToMime[ext];
+    if (!mimeType || !isValidMime(mimeType)) {
+      skipped.push(name);
+      continue;
+    }
+
+    let entryBuffer: Buffer;
+    try {
+      entryBuffer = entry.getData();
+    } catch {
+      skipped.push(name); // corrupt entry — skip silently
+      continue;
+    }
+
+    if (entryBuffer.length > MAX_FILE_SIZE) {
+      skipped.push(name);
+      continue;
+    }
+
+    // Strip directory prefix — store only the file's basename
+    entries.push({ buffer: entryBuffer, fileName: path.basename(name), mimeType });
+  }
+
+  return { entries, skipped };
+}
+
+// ── POST handler ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   let formData: FormData;
@@ -48,16 +141,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
   }
 
-  const submittedBy = (formData.get("email") as string | null) ?? null;
-  const submittedName = (formData.get("name") as string | null) ?? null;
+  const submittedBy   = (formData.get("email") as string | null) ?? null;
+  const submittedName = (formData.get("name")  as string | null) ?? null;
+  const submittedVendorId = (formData.get("vendorId") as string | null) ?? null;
   const files = formData.getAll("files") as File[];
 
   // Resolve organizationId from Clerk session if authenticated.
   // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
   const { orgId: organizationId } = await auth();
 
-  // Enforce per-org monthly quota (unauthenticated uploads are always allowed)
-  const quota = await checkQuotaOrNull(organizationId);
+  // Feature 2: resolve vendorId and org from the vendor the user selected in the portal.
+  // Authenticated users already have orgId from Clerk — skip vendor lookup for them.
+  let vendorId: string | null = null;
+  let resolvedOrgId: string | null | undefined = organizationId;
+
+  if (submittedVendorId && !organizationId) {
+    const vendorRecord = await prisma.vendor.findUnique({
+      where: { id: submittedVendorId },
+      select: { id: true, organizationId: true },
+    });
+    if (vendorRecord) {
+      vendorId = vendorRecord.id;
+      resolvedOrgId = vendorRecord.organizationId ?? null;
+    }
+    // If vendor not found, fall through as anonymous upload (safe — no routing)
+  }
+
+  // Enforce per-org monthly quota (unauthenticated uploads without a known org are always allowed)
+  const quota = await checkQuotaOrNull(resolvedOrgId ?? null);
   if (!quota.allowed) {
     return NextResponse.json(
       {
@@ -88,6 +199,100 @@ export async function POST(request: NextRequest) {
 
   for (const file of files) {
     try {
+      // ── ZIP branch ───────────────────────────────────────────────────────────
+      if (isZipMime(file.type)) {
+        if (file.size > MAX_ZIP_SIZE) {
+          results.push({
+            referenceNo: "",
+            fileName: file.name,
+            status: "error",
+            error: "ZIP exceeds 50 MB limit",
+          });
+          continue;
+        }
+
+        const zipBuffer = Buffer.from(await file.arrayBuffer());
+        const { entries, skipped, error: zipError } = expandZipEntries(zipBuffer);
+
+        if (zipError) {
+          results.push({ referenceNo: "", fileName: file.name, status: "error", error: zipError });
+          continue;
+        }
+
+        if (entries.length === 0) {
+          results.push({
+            referenceNo: "",
+            fileName: file.name,
+            status: "error",
+            error: `No supported invoice files found inside ZIP${skipped.length ? ` (${skipped.length} unsupported entries skipped)` : ""}.`,
+          });
+          continue;
+        }
+
+        // Process each extracted entry exactly like a directly-uploaded invoice file
+        for (const entry of entries) {
+          try {
+            const stored = await storeFile(entry.buffer, entry.fileName, entry.mimeType, "web");
+            const referenceNo = generateReferenceNo();
+
+            const invoice = await prisma.invoice.create({
+              data: {
+                referenceNo,
+                channel: "web",
+                status: "processing",
+                fileUrl: stored.url,
+                fileName: stored.fileName,
+                mimeType: stored.mimeType,
+                fileSize: stored.fileSize,
+                submittedBy,
+                submittedName,
+                vendorId,
+                ...(resolvedOrgId ? { organizationId: resolvedOrgId } : {}),
+              },
+            });
+
+            await prisma.ingestionEvent.create({
+              data: {
+                invoiceId: invoice.id,
+                eventType: "received",
+                metadata: JSON.stringify({
+                  channel: "web",
+                  fileName: entry.fileName,
+                  submittedBy,
+                  fromZip: file.name,
+                }),
+              },
+            });
+
+            scheduleBackground(
+              processInvoice(invoice.id, referenceNo, entry.buffer, entry.mimeType, submittedBy, resolvedOrgId).catch(async (err) => {
+                console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
+                try {
+                  await prisma.invoice.update({
+                    where: { id: invoice.id },
+                    data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+                  });
+                } catch (updateErr) {
+                  console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+                }
+              })
+            );
+
+            results.push({ referenceNo, fileName: entry.fileName, status: "received" });
+          } catch (err) {
+            console.error("[Upload/ZIP] Error processing entry:", err);
+            results.push({
+              referenceNo: "",
+              fileName: entry.fileName,
+              status: "error",
+              error: "Processing failed. Please try again.",
+            });
+          }
+        }
+        continue; // done with this ZIP — move to next file in outer loop
+      }
+
+      // ── Single-file branch ───────────────────────────────────────────────────
       if (!isValidMime(file.type)) {
         results.push({
           referenceNo: "",
@@ -112,10 +317,7 @@ export async function POST(request: NextRequest) {
       const stored = await storeFile(buffer, file.name, file.type, "web");
       const referenceNo = generateReferenceNo();
 
-      // Find or create vendor
-      let vendorId: string | null = null;
-
-      // Create invoice record — inject organizationId when user is authenticated
+      // Create invoice record — inject organizationId when user is authenticated or vendor selected
       const invoice = await prisma.invoice.create({
         data: {
           referenceNo,
@@ -128,7 +330,7 @@ export async function POST(request: NextRequest) {
           submittedBy,
           submittedName,
           vendorId,
-          ...(organizationId ? { organizationId } : {}),
+          ...(resolvedOrgId ? { organizationId: resolvedOrgId } : {}),
         },
       });
 
@@ -147,7 +349,7 @@ export async function POST(request: NextRequest) {
 
       // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
       scheduleBackground(
-        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
+        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy, resolvedOrgId).catch(async (err) => {
           console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
           // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
           // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.

@@ -300,7 +300,10 @@ export default function ProviderPortal() {
               </p>
             )}
             <p className="text-xs text-gray-500 mb-5">Drag your file or click to browse</p>
-            <UploadZone prefilledEmail={isSignedIn ? (user?.primaryEmailAddress?.emailAddress ?? "") : ""} />
+            <UploadZone
+              prefilledEmail={isSignedIn ? (user?.primaryEmailAddress?.emailAddress ?? "") : ""}
+              requireVendorSelection={!isSignedIn}
+            />
           </div>
 
           {/* Right column */}

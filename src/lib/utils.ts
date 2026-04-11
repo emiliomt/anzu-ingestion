@@ -74,8 +74,16 @@ export function isValidMime(mime: string): boolean {
     // Colombian UBL XML electronic invoices
     "text/xml",
     "application/xml",
+    // ZIP archives (extracted server-side into individual invoice files)
+    "application/zip",
+    "application/x-zip-compressed",
   ];
   return allowed.includes(mime);
+}
+
+/** Returns true when the MIME type is a ZIP archive */
+export function isZipMime(mime: string): boolean {
+  return mime === "application/zip" || mime === "application/x-zip-compressed";
 }
 
 /** Convert ArrayBuffer to base64 */
