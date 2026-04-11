@@ -17,6 +17,7 @@
 //   const { orgId }       = await requireOrgId();           // org required, any role
 
 import { auth } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 
@@ -54,10 +55,25 @@ export async function requireRole(
   allowedRoles: OrgRole[] = ALL_ORG_ROLES
 ): Promise<{ orgId: string; userId: string; role: OrgRole }> {
   const session = await auth();
-  const { userId, orgId, orgRole } = session;
+  const { userId, orgId: jwtOrgId, orgRole: jwtOrgRole } = session;
 
   if (!userId) throw new RoleError("Authentication required", 401);
-  if (!orgId)  throw new RoleError("No active organization — create or select one first", 403);
+
+  // Resolve orgId: JWT first, then middleware-injected header fallback
+  let orgId = jwtOrgId;
+  let orgRole = jwtOrgRole;
+
+  if (!orgId) {
+    const h = await headers();
+    const fallbackOrgId   = h.get("x-anzu-org-id");
+    const fallbackOrgRole = h.get("x-anzu-org-role");
+    if (fallbackOrgId) {
+      orgId   = fallbackOrgId;
+      orgRole = fallbackOrgRole ?? ROLES.MEMBER;
+    }
+  }
+
+  if (!orgId) throw new RoleError("No active organization — create or select one first", 403);
 
   const role = (orgRole ?? ROLES.MEMBER) as OrgRole;
 

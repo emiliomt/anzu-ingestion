@@ -1,8 +1,13 @@
 // Anzu Dynamics — Clerk Auth + Multi-Tenant Middleware
 // Protects all routes; enforces org membership on admin/dashboard routes.
 // Role-checking is done inside API handlers — middleware only ensures auth + org presence.
+//
+// Fallback path: when the Clerk JWT lacks orgId (Clerk domain not added to allowed-origins
+// so setActive() can't refresh the token), the middleware queries Clerk's API directly,
+// injects x-anzu-org-id + x-anzu-org-role headers, and lets the user through.
+// tenant.ts + roles.ts read these headers as a fallback when auth().orgId is null.
 
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware, createRouteMatcher, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 // ── Public routes — no Clerk session required ──────────────────────────────────
@@ -53,6 +58,7 @@ const requiresOrg = createRouteMatcher([
   "/api/fine-tune(.*)",
   "/api/training(.*)",
   "/api/security(.*)",
+  "/api/billing(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
@@ -69,12 +75,41 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(signInUrl);
   }
 
-  // Authenticated but no active org for org-required routes → redirect to /org-required
-  // This catches users who signed in but haven't created/joined an organization yet.
+  // Org required but JWT has no orgId ──────────────────────────────────────────
+  // This happens when Clerk's session token hasn't been refreshed with the org
+  // (e.g. allowed-origins not configured for this domain in the Clerk dashboard).
+  // Fix: query Clerk's API server-side for the user's memberships, inject the
+  // org into trusted request headers so API routes can use it directly.
   if (requiresOrg(req) && !orgId) {
-    const orgRequiredUrl = new URL("/org-required", req.url);
-    orgRequiredUrl.searchParams.set("return_to", req.nextUrl.pathname);
-    return NextResponse.redirect(orgRequiredUrl);
+    try {
+      const client = await clerkClient();
+      const { data: memberships } = await client.users.getOrganizationMembershipList({
+        userId,
+        limit: 5,
+      });
+
+      if (memberships.length === 0) {
+        // User genuinely has no org — send to creation flow
+        const dest = new URL("/org-required", req.url);
+        dest.searchParams.set("return_to", req.nextUrl.pathname);
+        return NextResponse.redirect(dest);
+      }
+
+      // Inject the first (or only) org + role as trusted server-set headers.
+      // Strip any client-supplied values first to prevent header injection.
+      const reqHeaders = new Headers(req.headers);
+      reqHeaders.delete("x-anzu-org-id");
+      reqHeaders.delete("x-anzu-org-role");
+      reqHeaders.set("x-anzu-org-id",   memberships[0].organization.id);
+      reqHeaders.set("x-anzu-org-role",  memberships[0].role);
+      return NextResponse.next({ request: { headers: reqHeaders } });
+    } catch (err) {
+      console.error("[middleware] org membership lookup failed:", err);
+      // Fall through to org-required on API error
+      const dest = new URL("/org-required", req.url);
+      dest.searchParams.set("return_to", req.nextUrl.pathname);
+      return NextResponse.redirect(dest);
+    }
   }
 
   return NextResponse.next();

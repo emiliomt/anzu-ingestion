@@ -2,10 +2,13 @@
 // Extracts the current Clerk Organization ID and provides Prisma query scoping helpers.
 // Every DB query on tenant-scoped models MUST go through withOrg() or requireOrgId().
 //
-// Company context: Anzu automates invoice lifecycle for Mexico (CFDI) and Colombia
-// (Factura Electrónica). Each client company is an isolated tenant via Clerk Orgs.
+// orgId resolution order:
+//   1. auth().orgId  — normal case (Clerk JWT has been refreshed with active org)
+//   2. x-anzu-org-id header — fallback injected by middleware when JWT lacks orgId
+//      (happens when Clerk's allowed-origins isn't configured for this domain)
 
 import { auth } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 
 /**
  * Returns the current Clerk organizationId.
@@ -14,13 +17,17 @@ import { auth } from "@clerk/nextjs/server";
  */
 export async function requireOrgId(): Promise<string> {
   const { orgId } = await auth();
-  if (!orgId) {
-    throw new Error(
-      "No active Clerk organization. The user must belong to (or create) an organization. " +
-      "Redirect to /dashboard/onboarding to create one."
-    );
-  }
-  return orgId;
+  if (orgId) return orgId;
+
+  // Fallback: middleware-injected header (users whose Clerk JWT lacks orgId)
+  const h = await headers();
+  const fallback = h.get("x-anzu-org-id");
+  if (fallback) return fallback;
+
+  throw new Error(
+    "No active Clerk organization. The user must belong to (or create) an organization. " +
+    "Redirect to /onboarding to create one."
+  );
 }
 
 /**
@@ -29,7 +36,10 @@ export async function requireOrgId(): Promise<string> {
  */
 export async function getOrgId(): Promise<string | null> {
   const { orgId } = await auth();
-  return orgId ?? null;
+  if (orgId) return orgId;
+
+  const h = await headers();
+  return h.get("x-anzu-org-id") ?? null;
 }
 
 /**
