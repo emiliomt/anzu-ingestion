@@ -255,7 +255,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", requireVendo
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file · Up to 10 files
+          PDF, PNG, JPG, HEIC, TIFF, WebP or ZIP · Max 20 MB per file (200 MB for ZIP) · Up to 10 files
         </p>
       </div>
 

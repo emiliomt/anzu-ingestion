@@ -41,7 +41,7 @@ export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if need
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB per individual invoice file
-const MAX_ZIP_SIZE = 50 * 1024 * 1024;  // 50 MB for the ZIP archive itself
+const MAX_ZIP_SIZE = 200 * 1024 * 1024; // 200 MB for the ZIP archive itself
 const MAX_ZIP_ENTRIES = 20;             // ZIP bomb guard
 
 // ── ZIP extraction helper ──────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
             referenceNo: "",
             fileName: file.name,
             status: "error",
-            error: "ZIP exceeds 50 MB limit",
+            error: "ZIP exceeds 200 MB limit",
           });
           continue;
         }
