@@ -56,16 +56,23 @@ export async function POST(request: NextRequest) {
   // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
   const { orgId: organizationId } = await auth();
 
-  // Enforce per-org monthly quota (unauthenticated uploads are always allowed)
-  const quota = await checkQuotaOrNull(organizationId);
-  if (!quota.allowed) {
-    return NextResponse.json(
-      {
-        error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
-        quota,
-      },
-      { status: 429 }
-    );
+  // Enforce per-org monthly quota (unauthenticated uploads are always allowed).
+  // Wrapped in try/catch so a missing subscriptions table (e.g. first deploy before
+  // prisma db push finishes) fails open rather than blocking all uploads.
+  try {
+    const quota = await checkQuotaOrNull(organizationId);
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
+          quota,
+        },
+        { status: 429 }
+      );
+    }
+  } catch (quotaErr) {
+    // Non-fatal — log and continue; quota enforcement resumes once DB schema is in sync
+    console.warn("[Upload] quota check failed (schema may be out of sync):", quotaErr);
   }
 
   if (!files || files.length === 0) {
@@ -164,7 +171,8 @@ export async function POST(request: NextRequest) {
 
       results.push({ referenceNo, fileName: file.name, status: "received" });
     } catch (err) {
-      console.error("[Upload] Error processing file:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Upload] Error processing file "${file.name}":`, msg, err);
       results.push({
         referenceNo: "",
         fileName: file.name,
