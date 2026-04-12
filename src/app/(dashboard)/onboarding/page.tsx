@@ -5,15 +5,16 @@
 //   Step 3: Quick-start — upload a test invoice and run the pipeline
 //
 // Clerk Organizations must be enabled in the Clerk dashboard.
-// This page uses Clerk's <CreateOrganization /> component for step 1.
+// Step 1 redirects to Clerk's hosted org-creation page via redirectToCreateOrganization()
+// instead of using the embedded <CreateOrganization /> component, which requires the
+// deployment domain to be in Clerk's Allowed Origins (otherwise shows "Submission failed").
 
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useOrganization, useOrganizationList, CreateOrganization } from "@clerk/nextjs";
-import type { SetActive } from "@clerk/types";
-import { Building2, Globe, Zap, CheckCircle2, ArrowRight, ChevronRight } from "lucide-react";
+import { useOrganization, useOrganizationList, useClerk } from "@clerk/nextjs";
+import { Building2, Globe, Zap, CheckCircle2, ArrowRight, ChevronRight, Plus } from "lucide-react";
 
 const ERP_OPTIONS = [
   { value: "sinco",   label: "SINCO",          flag: "🇨🇴", market: "Colombia" },
@@ -233,32 +234,23 @@ function StepQuickStart({ onFinish }: { onFinish: () => void }) {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const clerk = useClerk();
   const { organization } = useOrganization();
-  const { userMemberships, isLoaded, setActive } = useOrganizationList({ userMemberships: true });
+  const { userMemberships, isLoaded } = useOrganizationList({ userMemberships: true });
   const [step, setStep] = useState<1 | 2 | 3>(organization ? 2 : 1);
-  const [config, setConfig] = useState<{ country: string; erp: string } | null>(null);
-  const [activating, setActivating] = useState(false);
 
   // If user already has an active org, skip step 1
   const effectiveStep = organization && step === 1 ? 2 : step;
   const memberships = userMemberships?.data ?? [];
 
-  const handleOrgCreated = () => setStep(2);
-
-  // Activate an existing org and proceed to step 2
-  const handleActivateExisting = async (orgId: string) => {
-    setActivating(true);
-    try {
-      await (setActive as SetActive)({ organization: orgId });
-      // Hard navigation to force fresh server-side session
-      window.location.href = "/admin";
-    } finally {
-      setActivating(false);
-    }
+  // Navigate to admin — middleware fallback injects the org from the Clerk API server-side.
+  // We do NOT call setActive() here because it hangs when the Railway domain is not in
+  // Clerk's allowed origins (the CORS restriction prevents the JWT refresh call).
+  const handleActivateExisting = () => {
+    window.location.href = "/admin";
   };
 
   const handleConfigure = async (data: { country: string; erp: string }) => {
-    setConfig(data);
     // Persist initial settings for this org
     try {
       await fetch("/api/settings", {
@@ -355,23 +347,23 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
-              {/* Clerk org creation widget */}
-              <CreateOrganization
-                afterCreateOrganizationUrl="/onboarding"
-                appearance={{
-                  variables: {
-                    colorPrimary: "#F97316",
-                    colorBackground: "#ffffff",
-                    borderRadius: "0.75rem",
-                  },
-                  elements: {
-                    card: "shadow-none border-0 p-0",
-                    headerTitle: "text-base font-bold text-gray-900",
-                    headerSubtitle: "text-sm text-gray-500",
-                    formButtonPrimary: "bg-orange-500 hover:bg-orange-600",
-                  },
-                }}
-              />
+              {/* Org creation — redirect to Clerk's hosted page so allowed-origins
+                  restrictions on the Railway domain don't block the form submission. */}
+              <button
+                type="button"
+                onClick={() =>
+                  void clerk.redirectToCreateOrganization()
+                }
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white"
+                style={{ background: "linear-gradient(135deg, #F97316, #EA580C)" }}
+              >
+                <Plus className="w-4 h-4" />
+                Crear organización
+              </button>
+              <p className="text-xs text-center text-gray-400">
+                Te redirigiremos a la página segura de Clerk para crear tu organización.
+                Regresarás automáticamente al finalizar.
+              </p>
 
               {/* Activate an existing org if user already has one */}
               {isLoaded && memberships.length > 0 && (
@@ -381,18 +373,14 @@ export default function OnboardingPage() {
                     {memberships.map((m) => (
                       <button
                         key={m.organization.id}
-                        onClick={() => handleActivateExisting(m.organization.id)}
-                        disabled={activating}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors text-left disabled:opacity-60"
+                        onClick={handleActivateExisting}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors text-left"
                       >
                         <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                           {m.organization.name.charAt(0).toUpperCase()}
                         </div>
                         <span className="text-sm font-medium text-orange-900 flex-1">{m.organization.name}</span>
-                        {activating
-                          ? <div className="w-3 h-3 border border-orange-500 border-t-transparent rounded-full animate-spin" />
-                          : <ChevronRight className="w-3 h-3 text-orange-400" />
-                        }
+                        <ChevronRight className="w-3 h-3 text-orange-400" />
                       </button>
                     ))}
                   </div>
