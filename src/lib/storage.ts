@@ -2,14 +2,19 @@ import fs from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
-const STORAGE_TYPE = (process.env.STORAGE_TYPE ?? "local") as "local" | "s3";
-const STORAGE_PATH = process.env.STORAGE_PATH ?? "./uploads";
-const S3_BUCKET   = process.env.AWS_BUCKET_NAME ?? "";
-const S3_REGION   = process.env.AWS_REGION ?? "auto";
+const STORAGE_TYPE  = (process.env.STORAGE_TYPE ?? "local") as "local" | "s3";
+const STORAGE_PATH  = process.env.STORAGE_PATH ?? "./uploads";
+const S3_BUCKET     = process.env.AWS_BUCKET_NAME ?? "";
+const S3_REGION     = process.env.AWS_REGION ?? "auto";
 // Optional custom endpoint — required for Cloudflare R2 and other S3-compatible providers.
 // Set S3_ENDPOINT_URL=https://<accountid>.r2.cloudflarestorage.com for R2.
 // Leave unset for standard AWS S3.
-const S3_ENDPOINT = process.env.S3_ENDPOINT_URL ?? undefined;
+const S3_ENDPOINT   = process.env.S3_ENDPOINT_URL ?? undefined;
+// Public base URL for serving stored files directly to browsers.
+// For R2: set S3_PUBLIC_URL to the bucket's Public Development URL (or custom domain).
+// For AWS S3: set to https://<bucket>.s3.<region>.amazonaws.com if public.
+// Leave unset to proxy files through /api/files (works but adds server load).
+const S3_PUBLIC_URL = process.env.S3_PUBLIC_URL?.replace(/\/$/, "") ?? undefined;
 
 export interface StoredFile {
   key: string;      // year/month/channel/uuid.ext
@@ -129,8 +134,12 @@ export async function readFile(fileUrl: string): Promise<Buffer> {
 
 /** Returns a URL suitable for the browser to fetch the file */
 export function getServeUrl(fileUrl: string): string {
-  // Use a relative URL so it resolves correctly on any domain (Railway, Vercel, localhost, etc.)
   if (fileUrl.startsWith("s3://")) {
+    // Serve directly from the public bucket URL when configured — no server proxy needed.
+    if (S3_PUBLIC_URL) {
+      const { key } = parseS3Url(fileUrl);
+      return `${S3_PUBLIC_URL}/${key}`;
+    }
     return `/api/files?s3=${encodeURIComponent(fileUrl)}`;
   }
   return `/api/files?path=${encodeURIComponent(fileUrl)}`;
