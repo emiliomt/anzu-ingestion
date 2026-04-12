@@ -4,8 +4,12 @@ import { v4 as uuidv4 } from "uuid";
 
 const STORAGE_TYPE = (process.env.STORAGE_TYPE ?? "local") as "local" | "s3";
 const STORAGE_PATH = process.env.STORAGE_PATH ?? "./uploads";
-const S3_BUCKET = process.env.AWS_BUCKET_NAME ?? "";
-const S3_REGION = process.env.AWS_REGION ?? "us-east-1";
+const S3_BUCKET   = process.env.AWS_BUCKET_NAME ?? "";
+const S3_REGION   = process.env.AWS_REGION ?? "auto";
+// Optional custom endpoint — required for Cloudflare R2 and other S3-compatible providers.
+// Set S3_ENDPOINT_URL=https://<accountid>.r2.cloudflarestorage.com for R2.
+// Leave unset for standard AWS S3.
+const S3_ENDPOINT = process.env.S3_ENDPOINT_URL ?? undefined;
 
 export interface StoredFile {
   key: string;      // year/month/channel/uuid.ext
@@ -68,7 +72,13 @@ async function storeToS3(
 ): Promise<StoredFile> {
   // Lazy-load AWS SDK so it's tree-shaken when not used
   const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-  const client = new S3Client({ region: S3_REGION });
+  const client = new S3Client({
+    region: S3_REGION,
+    // endpoint is required for Cloudflare R2 and other S3-compatible providers
+    ...(S3_ENDPOINT ? { endpoint: S3_ENDPOINT } : {}),
+    // R2 requires path-style URLs; harmless for AWS
+    forcePathStyle: !!S3_ENDPOINT,
+  });
 
   await client.send(
     new PutObjectCommand({
@@ -89,11 +99,22 @@ async function storeToS3(
   };
 }
 
+/** Shared S3Client config — reads the same env vars used by storeToS3 */
+function makeS3Client() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { S3Client } = require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
+  return new S3Client({
+    region: S3_REGION,
+    ...(S3_ENDPOINT ? { endpoint: S3_ENDPOINT } : {}),
+    forcePathStyle: !!S3_ENDPOINT,
+  });
+}
+
 /** Read a file from storage (local filesystem or S3) */
 export async function readFile(fileUrl: string): Promise<Buffer> {
   if (fileUrl.startsWith("s3://")) {
-    const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
-    const client = new S3Client({ region: S3_REGION });
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = makeS3Client();
     const { bucket, key } = parseS3Url(fileUrl);
 
     const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -118,9 +139,9 @@ export function getServeUrl(fileUrl: string): string {
 /** Generate a presigned S3 URL (1-hour expiry). Falls back to API route for local. */
 export async function getPresignedUrl(fileUrl: string, expiresIn = 3600): Promise<string> {
   if (fileUrl.startsWith("s3://")) {
-    const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
     const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
-    const client = new S3Client({ region: S3_REGION });
+    const client = makeS3Client();
     const { bucket, key } = parseS3Url(fileUrl);
 
     return getSignedUrl(
