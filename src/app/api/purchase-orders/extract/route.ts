@@ -5,7 +5,7 @@
  * structured fields for pre-filling the PO form.
  */
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { formatFilesApiScopeError, getOpenAIClient } from "@/lib/openai";
 import { storeFile } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -58,18 +58,12 @@ interface ExtractedPO {
   }>;
 }
 
-let _client: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
-}
-
 export async function POST(request: NextRequest) {
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY is not configured on the server." },
-      { status: 500 }
-    );
+  try {
+    getOpenAIClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   let formData: FormData;
@@ -104,14 +98,23 @@ export async function POST(request: NextRequest) {
   let uploadedFileId: string | null = null;
 
   if (mimeType === "application/pdf") {
-    const uploaded = await getClient().files.create({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      file: new File([new Uint8Array(buffer)], file.name, { type: "application/pdf" }) as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      purpose: "user_data" as any,
-    });
-    uploadedFileId = uploaded.id;
-    userContent.push({ type: "file", file: { file_id: uploadedFileId } });
+    try {
+      const uploaded = await getOpenAIClient({ requireFilesApi: true }).files.create({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        file: new File([new Uint8Array(buffer)], file.name, { type: "application/pdf" }) as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        purpose: "user_data" as any,
+      });
+      uploadedFileId = uploaded.id;
+      userContent.push({ type: "file", file: { file_id: uploadedFileId } });
+    } catch (err) {
+      const scopeMessage = formatFilesApiScopeError(err);
+      if (scopeMessage) {
+        return NextResponse.json({ error: scopeMessage }, { status: 500 });
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: `PDF upload failed: ${msg}` }, { status: 502 });
+    }
   } else {
     const imageType = mimeType.includes("png")
       ? "image/png"
@@ -132,7 +135,7 @@ export async function POST(request: NextRequest) {
 
   let raw = "";
   try {
-    const response = await getClient().chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1024,
       temperature: 0,
@@ -148,7 +151,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `AI extraction failed: ${msg}` }, { status: 502 });
   } finally {
     if (uploadedFileId) {
-      getClient().files.delete(uploadedFileId).catch(() => {});
+      getOpenAIClient({ requireFilesApi: true }).files.delete(uploadedFileId).catch(() => {});
     }
   }
 

@@ -11,8 +11,8 @@
  * TRABAJO EN ALTURA" → labor).
  */
 
-import OpenAI from "openai";
 import type { LineItemCategory } from "@/types/invoice";
+import { getOpenAIClient } from "./openai";
 
 export type { LineItemCategory };
 
@@ -21,11 +21,9 @@ export interface ClassificationResult {
   confidence: number;
 }
 
-// ── OpenAI client (lazy) ───────────────────────────────────────────────────
-let _client: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
+// ── OpenAI client wrapper ───────────────────────────────────────────────────
+function getClient() {
+  return getOpenAIClient();
 }
 
 // ── System prompt ──────────────────────────────────────────────────────────

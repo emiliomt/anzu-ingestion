@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import OpenAI from "openai";
+import { formatFilesApiScopeError, getOpenAIClient } from "@/lib/openai";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +15,16 @@ const MIN_EXAMPLES = 10;
  * Stores the job ID in the settings table so /api/training/status can poll it.
  *
  * Requirements:
- *   - OPENAI_API_KEY must be set
+ *   - OPENAI_FULL_ACCESS_API_KEY (preferred) or OPENAI_API_KEY must be set
  *   - At least 10 invoices with ocrText + corrections (OpenAI minimum)
  */
 export async function POST(_request: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+  let client;
+  try {
+    client = getOpenAIClient({ requireFilesApi: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   // Check for an already-running job
@@ -114,7 +117,6 @@ Return ONLY valid JSON — no preamble, no markdown fences, no explanation.\n\nI
   }
 
   const jsonlContent = lines.join("\n");
-  const client = new OpenAI({ apiKey });
 
   try {
     // Upload training file
@@ -153,6 +155,10 @@ Return ONLY valid JSON — no preamble, no markdown fences, no explanation.\n\nI
       trainingExamples: lines.length,
     });
   } catch (err) {
+    const scopeMessage = formatFilesApiScopeError(err);
+    if (scopeMessage) {
+      return NextResponse.json({ error: scopeMessage }, { status: 500 });
+    }
     console.error("[FineTune] Error:", err);
     return NextResponse.json(
       { error: String(err) },
