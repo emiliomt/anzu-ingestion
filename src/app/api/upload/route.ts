@@ -54,7 +54,22 @@ export async function POST(request: NextRequest) {
 
   // Resolve organizationId from Clerk session if authenticated.
   // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
-  const { orgId: organizationId } = await auth();
+  // Fallback: if JWT lacks orgId (domain not in Clerk allowed-origins), query Clerk API directly.
+  const session = await auth();
+  let organizationId: string | null = session.orgId ?? null;
+  if (session.userId && !organizationId) {
+    try {
+      const { clerkClient } = await import("@clerk/nextjs/server");
+      const client = await clerkClient();
+      const { data: memberships } = await client.users.getOrganizationMembershipList({
+        userId: session.userId,
+        limit: 1,
+      });
+      if (memberships.length > 0) organizationId = memberships[0].organization.id;
+    } catch {
+      // ignore — upload proceeds without orgId
+    }
+  }
 
   // Enforce per-org monthly quota (unauthenticated uploads are always allowed).
   // Wrapped in try/catch so a missing subscriptions table (e.g. first deploy before

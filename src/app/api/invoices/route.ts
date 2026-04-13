@@ -120,9 +120,10 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "ids array required" }, { status: 400 });
     }
 
-    // Only delete invoices belonging to the current org
+    // Only delete invoices belonging to the current org.
+    // Also match organizationId IS NULL for legacy rows uploaded before org-scoping was enforced.
     const where = orgId
-      ? { id: { in: body.ids }, organizationId: orgId }
+      ? { id: { in: body.ids }, OR: [{ organizationId: orgId }, { organizationId: null }] }
       : { id: { in: body.ids } };
 
     const { count } = await prisma.invoice.deleteMany({ where });
