@@ -101,22 +101,19 @@ export async function POST(request: NextRequest) {
   }
   if (!organizationId && formOrgId) organizationId = formOrgId;
 
-  // Enforce per-org monthly quota (unauthenticated uploads are always allowed).
+  // Quota checks are informational only; uploads are never blocked.
   // Wrapped in try/catch so a missing subscriptions table (e.g. first deploy before
-  // prisma db push finishes) fails open rather than blocking all uploads.
+  // prisma db push finishes) still allows uploads.
   try {
     const quota = await checkQuotaOrNull(organizationId);
     if (!quota.allowed) {
-      return NextResponse.json(
-        {
-          error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
-          quota,
-        },
-        { status: 429 }
+      console.warn(
+        `[Upload] quota exceeded for org ${organizationId ?? "none"} ` +
+        `(plan=${quota.plan}, used=${quota.used}, limit=${quota.limit}) — allowing upload`
       );
     }
   } catch (quotaErr) {
-    // Non-fatal — log and continue; quota enforcement resumes once DB schema is in sync
+    // Non-fatal — log and continue
     console.warn("[Upload] quota check failed (schema may be out of sync):", quotaErr);
   }
 
