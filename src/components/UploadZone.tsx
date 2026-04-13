@@ -40,9 +40,9 @@ interface UploadZoneProps {
   organizationId?: string;
 }
 
-const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp";
+const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
-const MAX_FILES = 10;
+const MAX_FILES = 250;
 
 export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -219,7 +219,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB · Up to 10 files
+          PDF, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB per file · Up to 250 files
         </p>
       </div>
 

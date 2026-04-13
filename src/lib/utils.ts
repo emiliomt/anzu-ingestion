@@ -78,6 +78,11 @@ export function isValidMime(mime: string): boolean {
   return allowed.includes(mime);
 }
 
+/** True when mime type represents a ZIP archive */
+export function isZipMime(mime: string): boolean {
+  return mime === "application/zip" || mime === "application/x-zip-compressed";
+}
+
 /** Convert bytes to base64 (Node Buffer respects byteOffset; raw ArrayBuffer does not) */
 export function bufferToBase64(data: ArrayBuffer | Buffer): string {
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
