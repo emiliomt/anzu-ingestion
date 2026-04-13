@@ -23,12 +23,25 @@ export async function GET(request: NextRequest) {
   const flagged  = searchParams.get("flagged") === "true";
   const skip     = (page - 1) * limit;
 
-  // Resolve current org — filter by org if available, else show all (legacy single-tenant)
-  const { orgId } = await auth();
+  // Resolve current org — use JWT orgId, fall back to Clerk API if JWT lacks it
+  const session = await auth();
+  let orgId = session.orgId ?? null;
+  if (session.userId && !orgId) {
+    try {
+      const { clerkClient } = await import("@clerk/nextjs/server");
+      const client = await clerkClient();
+      const { data: memberships } = await client.users.getOrganizationMembershipList({
+        userId: session.userId,
+        limit: 1,
+      });
+      if (memberships.length > 0) orgId = memberships[0].organization.id;
+    } catch { /* ignore */ }
+  }
 
   // ── Build where clause ────────────────────────────────────────────────────────
+  // Include null-organizationId invoices (vendor portal uploads not yet org-tagged)
   const where: Record<string, unknown> = orgId
-    ? { organizationId: orgId }
+    ? { OR: [{ organizationId: orgId }, { organizationId: null }] }
     : {};
 
   if (status)  where.status  = status;
