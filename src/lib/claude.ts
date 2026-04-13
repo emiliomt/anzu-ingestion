@@ -271,6 +271,10 @@ async function handleImageOrPdf(
   mimeType: string,
   opts: ExtractionOptions = {}
 ): Promise<{ result: InvoiceExtraction; ocrText: string }> {
+  const ocrClient = mimeType === "application/pdf"
+    ? getClient({ requireFilesApi: true })
+    : getClient();
+  const extractClient = mimeType === "application/pdf" ? ocrClient : getClient();
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ocrParts: any[] = [];
@@ -278,7 +282,7 @@ async function handleImageOrPdf(
 
   if (mimeType === "application/pdf") {
     try {
-      const uploaded = await getClient({ requireFilesApi: true }).files.create({
+      const uploaded = await ocrClient.files.create({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -330,7 +334,7 @@ async function handleImageOrPdf(
   // ── Step B: Call GPT-4o for OCR ───────────────────────────────────────
   let rawOcrText = "";
   try {
-    const ocrResp = await getClient().chat.completions.create({
+    const ocrResp = await ocrClient.chat.completions.create({
       model: OCR_MODEL,
       max_tokens: OCR_MAX_OUTPUT_TOKENS,
       temperature: 0,
@@ -343,7 +347,7 @@ async function handleImageOrPdf(
   } finally {
     // Clean up uploaded PDF file regardless of OCR success/failure
     if (uploadedFileId) {
-      getClient({ requireFilesApi: true }).files.delete(uploadedFileId).catch(() => {});
+      ocrClient.files.delete(uploadedFileId).catch(() => {});
     }
   }
 
@@ -372,7 +376,7 @@ async function handleImageOrPdf(
   const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
   const extractResp = await Promise.race([
-    getClient().chat.completions.create({
+    extractClient.chat.completions.create({
       model: extractModel,
       max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
       temperature: 0,
