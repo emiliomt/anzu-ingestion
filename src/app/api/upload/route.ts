@@ -15,23 +15,6 @@ import { generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
 
-function writeDebugLog(payload: {
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data: Record<string, unknown>;
-  timestamp?: number;
-}) {
-  try {
-    require("fs").appendFileSync(
-      "/opt/cursor/logs/debug.log",
-      JSON.stringify({ ...payload, timestamp: payload.timestamp ?? Date.now() }) + "\n"
-    );
-  } catch {
-    // best-effort debug logging
-  }
-}
-
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
 let waitUntilFn: ((promise: Promise<unknown>) => void) | null = null;
@@ -157,20 +140,6 @@ export async function POST(request: NextRequest) {
 
   for (const file of files) {
     try {
-      // #region agent log
-      writeDebugLog({
-        hypothesisId: "H4",
-        location: "src/app/api/upload/route.ts:POST",
-        message: "Processing upload file",
-        data: {
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size,
-        },
-        timestamp: Date.now(),
-      });
-      // #endregion
-
       if (!isValidMime(file.type)) {
         results.push({
           referenceNo: "",
@@ -250,19 +219,6 @@ export async function POST(request: NextRequest) {
       const msg = err instanceof Error ? err.message : String(err);
       const actionableError = mapUploadErrorMessage(err);
       console.error(`[Upload] Error processing file "${file.name}":`, msg, err);
-      // #region agent log
-      writeDebugLog({
-        hypothesisId: "H5",
-        location: "src/app/api/upload/route.ts:POST",
-        message: "Upload file processing failed and response is masked",
-        data: {
-          fileName: file.name,
-          errorMessage: msg.slice(0, 300),
-          returnedError: actionableError,
-        },
-        timestamp: Date.now(),
-      });
-      // #endregion
       results.push({
         referenceNo: "",
         fileName: file.name,
