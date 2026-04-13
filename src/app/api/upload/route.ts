@@ -212,16 +212,16 @@ async function processInvoice(
     },
   });
 
-  // Load settings scoped to this organization (with global fallback)
-  const settings = await getSettings(organizationId ?? null);
-
-  // Load active custom fields
-  const activeCustomFields = await prisma.customField.findMany({
-    where: { isActive: true },
-    orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
-  });
-
   try {
+    // Load settings scoped to this organization (with global fallback)
+    const settings = await getSettings(organizationId ?? null);
+
+    // Load active custom fields
+    const activeCustomFields = await prisma.customField.findMany({
+      where: { isActive: true },
+      orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+    });
+
     const { result: extraction, ocrText } = await extractInvoiceWithOcr(buffer, mimeType, {
       default_country:    settings.default_country,
       default_currency:   settings.default_currency,
