@@ -15,6 +15,7 @@ import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime, isZipMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
+import { enqueueInvoice } from "@/lib/jobs/queues";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -41,6 +42,7 @@ export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if need
 const MAX_FILES = 2500;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 const MAX_ZIP_ENTRIES = 2000;
+const MAX_ANONYMOUS_INLINE_FILES = 20;
 
 type UploadInputFile = {
   name: string;
@@ -221,22 +223,58 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
-      scheduleBackground(
-        processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
-          console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
-          // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
-          // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
-          try {
-            await prisma.invoice.update({
-              where: { id: invoice.id },
-              data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
-            });
-          } catch (updateErr) {
-            console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
-          }
-        })
-      );
+      if (organizationId) {
+        try {
+          await enqueueInvoice({
+            invoiceId: invoice.id,
+            organizationId,
+            fileUrl: stored.url,
+            mimeType: stored.mimeType,
+          });
+        } catch (queueErr) {
+          console.error(`[Upload] Queue enqueue failed for ${invoice.id}, falling back inline:`, queueErr);
+          scheduleBackground(
+            processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
+              console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
+              // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
+              // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
+              try {
+                await prisma.invoice.update({
+                  where: { id: invoice.id },
+                  data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+                });
+              } catch (updateErr) {
+                console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+              }
+            })
+          );
+        }
+      } else if (expandedFiles.length <= MAX_ANONYMOUS_INLINE_FILES) {
+        // Anonymous uploads cannot be queued because the queue payload requires organizationId.
+        // Keep inline behavior for smaller batches.
+        scheduleBackground(
+          processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
+            console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
+            try {
+              await prisma.invoice.update({
+                where: { id: invoice.id },
+                data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+              });
+            } catch (updateErr) {
+              console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
+            }
+          })
+        );
+      } else {
+        results.push({
+          referenceNo: "",
+          fileName: file.name,
+          status: "error",
+          error:
+            "Large batch extraction requires organization context. Sign in to an organization workspace or split into smaller batches.",
+        });
+        continue;
+      }
 
       results.push({ referenceNo, fileName: file.name, status: "received" });
     } catch (err) {
