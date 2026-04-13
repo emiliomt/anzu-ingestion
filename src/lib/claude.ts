@@ -68,25 +68,6 @@ function getClient(): OpenAI {
   return _client;
 }
 
-// #region agent log
-/** Session 2a885f: stdout for Railway/hosted logs; POST for local Cursor debug ingest */
-function agentOcrDebugLog(entry: {
-  location: string;
-  message: string;
-  data: Record<string, unknown>;
-  hypothesisId: string;
-}) {
-  const payload = { sessionId: "2a885f", ...entry, timestamp: Date.now() };
-  const line = JSON.stringify(payload);
-  console.info("[anzu-ocr-debug]", line);
-  fetch("http://127.0.0.1:7553/ingest/eedea92a-3d38-42dc-9d34-bd178f933bd4", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "2a885f" },
-    body: line,
-  }).catch(() => {});
-}
-// #endregion
-
 const OCR_MODEL       = "gpt-4o";                    // vision — needed for image/PDF OCR
 const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap structured extraction
 const OCR_MAX_OUTPUT_TOKENS = 16_384;
@@ -294,20 +275,6 @@ async function handleImageOrPdf(
   mimeType: string,
   opts: ExtractionOptions = {}
 ): Promise<{ result: InvoiceExtraction; ocrText: string }> {
-  // #region agent log
-  agentOcrDebugLog({
-    location: "claude.ts:handleImageOrPdf:entry",
-    message: "ocr pipeline entry",
-    data: {
-      mimeType,
-      bufferLength: buffer.length,
-      byteOffset: buffer.byteOffset,
-      abByteLength: buffer.buffer?.byteLength ?? null,
-    },
-    hypothesisId: "A",
-  });
-  // #endregion
-
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ocrParts: any[] = [];
@@ -344,20 +311,6 @@ async function handleImageOrPdf(
 
     const base64Data = bufferToBase64(rasterBuffer);
 
-    // #region agent log
-    agentOcrDebugLog({
-      location: "claude.ts:handleImageOrPdf:imageUrl",
-      message: "vision data-url mime vs declared file mime",
-      data: {
-        declaredMime: mimeType,
-        dataUrlMediaType: imageType,
-        base64Len: base64Data.length,
-        rasterizedHeicTiff: needsHeicTiffRaster,
-      },
-      hypothesisId: "D",
-    });
-    // #endregion
-
     ocrParts.push({
       type: "image_url",
       image_url: {
@@ -374,7 +327,6 @@ async function handleImageOrPdf(
 
   // ── Step B: Call GPT-4o for OCR ───────────────────────────────────────
   let rawOcrText = "";
-  let ocrFinishReason: string | null = null;
   try {
     const ocrResp = await getClient().chat.completions.create({
       model: OCR_MODEL,
@@ -385,7 +337,6 @@ async function handleImageOrPdf(
         { role: "user", content: ocrParts },
       ],
     });
-    ocrFinishReason = ocrResp.choices[0]?.finish_reason ?? null;
     rawOcrText = ocrResp.choices[0]?.message?.content ?? "";
   } finally {
     // Clean up uploaded PDF file regardless of OCR success/failure
@@ -393,19 +344,6 @@ async function handleImageOrPdf(
       getClient().files.delete(uploadedFileId).catch(() => {});
     }
   }
-
-  // #region agent log
-  agentOcrDebugLog({
-    location: "claude.ts:handleImageOrPdf:postOcr",
-    message: "after OCR API",
-    data: {
-      rawOcrLen: rawOcrText.length,
-      ocrFinishReason,
-      isPdf: mimeType === "application/pdf",
-    },
-    hypothesisId: "B",
-  });
-  // #endregion
 
   // ── Step C: Clean the OCR text ────────────────────────────────────────
   const cleanedText = cleanOcrText(rawOcrText);
@@ -422,19 +360,6 @@ async function handleImageOrPdf(
 
   // ── Step D: Call GPT-4o-mini for structured extraction ────────────────
   const truncatedText = cleanedText.slice(0, EXTRACTION_INPUT_CHAR_LIMIT);
-
-  // #region agent log
-  agentOcrDebugLog({
-    location: "claude.ts:handleImageOrPdf:preExtract",
-    message: "cleaned vs truncated text sizes",
-    data: {
-      cleanedLen: cleanedText.length,
-      truncatedLen: truncatedText.length,
-      charsDropped: Math.max(0, cleanedText.length - truncatedText.length),
-    },
-    hypothesisId: "C",
-  });
-  // #endregion
 
   const timeoutMs = opts.timeout_ms ?? 25_000;
   const customFieldsSection = opts.customFields && opts.customFields.length > 0
@@ -463,19 +388,6 @@ async function handleImageOrPdf(
   const raw = extractResp.choices[0]?.message?.content ?? "";
   const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
 
-  // #region agent log
-  agentOcrDebugLog({
-    location: "claude.ts:handleImageOrPdf:postExtract",
-    message: "after extraction API",
-    data: {
-      extractFinishReason,
-      responseCharLen: raw.length,
-      extractModel,
-    },
-    hypothesisId: "F",
-  });
-  // #endregion
-
   const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
   let rawParsed: unknown;
@@ -493,14 +405,6 @@ async function handleImageOrPdf(
 
   const validation = InvoiceExtractionSchema.safeParse(rawParsed);
   let parsed: InvoiceExtraction;
-  // #region agent log
-  agentOcrDebugLog({
-    location: "claude.ts:handleImageOrPdf:zod",
-    message: "extraction JSON zod result",
-    data: { zodOk: validation.success, issueCount: validation.success ? 0 : validation.error.issues.length },
-    hypothesisId: "E",
-  });
-  // #endregion
   if (validation.success) {
     parsed = validation.data as InvoiceExtraction;
   } else {
