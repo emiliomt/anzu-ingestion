@@ -78,12 +78,15 @@ export function isValidMime(mime: string): boolean {
   return allowed.includes(mime);
 }
 
-/** Convert ArrayBuffer to base64 */
-export function bufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+/** Convert bytes to base64 (Node Buffer respects byteOffset; raw ArrayBuffer does not) */
+export function bufferToBase64(data: ArrayBuffer | Buffer): string {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
+    return data.toString("base64");
+  }
+  const bytes = new Uint8Array(data);
   let binary = "";
   for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    binary += String.fromCharCode(bytes[i]!);
   }
   return btoa(binary);
 }
