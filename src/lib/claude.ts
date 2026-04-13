@@ -15,6 +15,7 @@
  */
 
 import OpenAI from "openai";
+import sharp from "sharp";
 import { z } from "zod";
 import { bufferToBase64 } from "./utils";
 import { cleanOcrText } from "./ocr-cleaner";
@@ -90,6 +91,7 @@ const OCR_MODEL       = "gpt-4o";                    // vision — needed for im
 const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap structured extraction
 const OCR_MAX_OUTPUT_TOKENS = 8192;
 const EXTRACTION_INPUT_CHAR_LIMIT = 12_000;
+const EXTRACT_MAX_OUTPUT_TOKENS = 4096;
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -321,18 +323,37 @@ async function handleImageOrPdf(
     uploadedFileId = uploaded.id;
     ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
   } else {
-    const base64Data = bufferToBase64(buffer);
-    const imageType = mimeType.includes("png")
-      ? "image/png"
-      : mimeType.includes("webp")
-      ? "image/webp"
-      : "image/jpeg";
+    const needsHeicTiffRaster =
+      mimeType.includes("heic") ||
+      mimeType.includes("heif") ||
+      mimeType.includes("tiff") ||
+      mimeType.includes("tif");
+
+    let rasterBuffer: Buffer = buffer;
+    let imageType: string;
+    if (needsHeicTiffRaster) {
+      rasterBuffer = await sharp(buffer).rotate().jpeg({ quality: 90 }).toBuffer();
+      imageType = "image/jpeg";
+    } else if (mimeType.includes("png")) {
+      imageType = "image/png";
+    } else if (mimeType.includes("webp")) {
+      imageType = "image/webp";
+    } else {
+      imageType = "image/jpeg";
+    }
+
+    const base64Data = bufferToBase64(rasterBuffer);
 
     // #region agent log
     agentOcrDebugLog({
       location: "claude.ts:handleImageOrPdf:imageUrl",
       message: "vision data-url mime vs declared file mime",
-      data: { declaredMime: mimeType, dataUrlMediaType: imageType, base64Len: base64Data.length },
+      data: {
+        declaredMime: mimeType,
+        dataUrlMediaType: imageType,
+        base64Len: base64Data.length,
+        rasterizedHeicTiff: needsHeicTiffRaster,
+      },
       hypothesisId: "D",
     });
     // #endregion
@@ -426,7 +447,7 @@ async function handleImageOrPdf(
   const extractResp = await Promise.race([
     getClient().chat.completions.create({
       model: extractModel,
-      max_tokens: 1500,
+      max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
@@ -440,6 +461,21 @@ async function handleImageOrPdf(
   ]);
 
   const raw = extractResp.choices[0]?.message?.content ?? "";
+  const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
+
+  // #region agent log
+  agentOcrDebugLog({
+    location: "claude.ts:handleImageOrPdf:postExtract",
+    message: "after extraction API",
+    data: {
+      extractFinishReason,
+      responseCharLen: raw.length,
+      extractModel,
+    },
+    hypothesisId: "F",
+  });
+  // #endregion
+
   const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
   let rawParsed: unknown;
