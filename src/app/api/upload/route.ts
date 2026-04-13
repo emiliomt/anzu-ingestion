@@ -177,8 +177,7 @@ export async function POST(request: NextRequest) {
         referenceNo: "",
         fileName: file.name,
         status: "error",
-        // Return real error so we can diagnose — will revert after fix
-        error: `Processing failed: ${msg}`,
+        error: "Processing failed. Please try again.",
       });
     }
   }

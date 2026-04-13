@@ -27,7 +27,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── invoices: add columns that may be missing ────────────────────────────────
+  // ── organizationId column — all tenant-scoped tables ─────────────────────────
+  await run('invoices.organizationId',       `ALTER TABLE invoices         ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('vendors.organizationId',        `ALTER TABLE vendors          ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('projects.organizationId',       `ALTER TABLE projects         ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('purchase_orders.organizationId',`ALTER TABLE purchase_orders  ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('caja_chica.organizationId',     `ALTER TABLE caja_chica       ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('custom_fields.organizationId',  `ALTER TABLE custom_fields    ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('invoice_matches.organizationId',`ALTER TABLE invoice_matches  ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  await run('erp_export_profiles.organizationId', `ALTER TABLE erp_export_profiles ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+
+  // ── invoices: remaining missing columns ──────────────────────────────────────
   await run('invoices.paidAt',          `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP`);
   await run('invoices.reviewedBy',      `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "reviewedBy" TEXT`);
   await run('invoices.ocrText',         `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "ocrText" TEXT`);
@@ -40,8 +50,15 @@ export async function POST(req: NextRequest) {
   await run('invoices.isDuplicate',     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "isDuplicate" BOOLEAN NOT NULL DEFAULT FALSE`);
   await run('invoices.duplicateOf',     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "duplicateOf" TEXT`);
 
-  // ── invoices: indexes ────────────────────────────────────────────────────────
+  // ── indexes ──────────────────────────────────────────────────────────────────
+  await run('idx invoices.orgId',        `CREATE INDEX IF NOT EXISTS "invoices_organizationId_idx" ON invoices("organizationId")`);
   await run('idx invoices.orgId+status', `CREATE INDEX IF NOT EXISTS "invoices_organizationId_status_idx" ON invoices("organizationId", status)`);
+  await run('idx vendors.orgId',         `CREATE INDEX IF NOT EXISTS "vendors_organizationId_idx" ON vendors("organizationId")`);
+  await run('idx projects.orgId',        `CREATE INDEX IF NOT EXISTS "projects_organizationId_idx" ON projects("organizationId")`);
+  await run('idx purchase_orders.orgId', `CREATE INDEX IF NOT EXISTS "purchase_orders_organizationId_idx" ON purchase_orders("organizationId")`);
+  await run('idx caja_chica.orgId',      `CREATE INDEX IF NOT EXISTS "caja_chica_organizationId_idx" ON caja_chica("organizationId")`);
+  await run('idx custom_fields.orgId',   `CREATE INDEX IF NOT EXISTS "custom_fields_organizationId_idx" ON custom_fields("organizationId")`);
+  await run('idx invoice_matches.orgId', `CREATE INDEX IF NOT EXISTS "invoice_matches_organizationId_idx" ON invoice_matches("organizationId")`);
 
   // ── erp_credentials ──────────────────────────────────────────────────────────
   await run('create erp_credentials', `
@@ -86,9 +103,5 @@ export async function POST(req: NextRequest) {
   `);
   await run('idx demo_sessions.orgId', `CREATE INDEX IF NOT EXISTS "demo_sessions_organizationId_idx" ON demo_sessions("organizationId")`);
 
-  return NextResponse.json({
-    ok: errors.length === 0,
-    steps,
-    errors,
-  });
+  return NextResponse.json({ ok: errors.length === 0, steps, errors });
 }
