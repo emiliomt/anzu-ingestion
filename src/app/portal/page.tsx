@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useUser, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import {
   Globe, Mail, MessageCircle, Shield, Zap, Search,
@@ -185,6 +185,8 @@ function PortalHeader() {
 /* ─── Main Page ──────────────────────────────────────────────────────────────── */
 export default function ProviderPortal() {
   const { isLoaded, isSignedIn, user } = useUser();
+  const searchParams = useSearchParams();
+  const portalOrgId = searchParams.get("org") ?? undefined;
 
   return (
     <div className="min-h-screen" style={{ background: "#F8FAFC" }}>
@@ -300,7 +302,10 @@ export default function ProviderPortal() {
               </p>
             )}
             <p className="text-xs text-gray-500 mb-5">Drag your file or click to browse</p>
-            <UploadZone prefilledEmail={isSignedIn ? (user?.primaryEmailAddress?.emailAddress ?? "") : ""} />
+            <UploadZone
+              prefilledEmail={isSignedIn ? (user?.primaryEmailAddress?.emailAddress ?? "") : ""}
+              organizationId={portalOrgId}
+            />
           </div>
 
           {/* Right column */}

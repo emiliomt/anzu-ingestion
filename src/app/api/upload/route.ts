@@ -51,10 +51,10 @@ export async function POST(request: NextRequest) {
   const submittedBy = (formData.get("email") as string | null) ?? null;
   const submittedName = (formData.get("name") as string | null) ?? null;
   const files = formData.getAll("files") as File[];
+  // org ID optionally embedded in portal URL and forwarded as a hidden form field
+  const formOrgId = (formData.get("organizationId") as string | null) ?? null;
 
-  // Resolve organizationId from Clerk session if authenticated.
-  // Unauthenticated vendor-portal uploads get null (visible only to admins without org filter).
-  // Fallback: if JWT lacks orgId (domain not in Clerk allowed-origins), query Clerk API directly.
+  // Resolve organizationId: JWT → Clerk API fallback → form field (vendor portal with ?org=)
   const session = await auth();
   let organizationId: string | null = session.orgId ?? null;
   if (session.userId && !organizationId) {
@@ -67,9 +67,10 @@ export async function POST(request: NextRequest) {
       });
       if (memberships.length > 0) organizationId = memberships[0].organization.id;
     } catch {
-      // ignore — upload proceeds without orgId
+      // ignore — fall through to form field
     }
   }
+  if (!organizationId && formOrgId) organizationId = formOrgId;
 
   // Enforce per-org monthly quota (unauthenticated uploads are always allowed).
   // Wrapped in try/catch so a missing subscriptions table (e.g. first deploy before
