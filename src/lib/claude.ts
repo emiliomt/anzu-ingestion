@@ -22,6 +22,23 @@ import { parseInvoiceXML } from "./xml-parser";
 import { EXTRACTION_SYSTEM_PROMPT, buildCustomFieldsSection, CustomFieldDef } from "./extraction-prompt";
 import { formatFilesApiScopeError, getOpenAIClient } from "./openai";
 
+function writeDebugLog(payload: {
+  hypothesisId: string;
+  location: string;
+  message: string;
+  data: Record<string, unknown>;
+  timestamp?: number;
+}) {
+  try {
+    require("fs").appendFileSync(
+      "/opt/cursor/logs/debug.log",
+      JSON.stringify({ ...payload, timestamp: payload.timestamp ?? Date.now() }) + "\n"
+    );
+  } catch {
+    // best-effort debug logging
+  }
+}
+
 // ── Extraction options (injected from app settings) ───────────────────────────
 export interface ExtractionOptions {
   /** ISO 3166-1 alpha-2 fallback country if currency detection fails */
@@ -271,6 +288,20 @@ async function handleImageOrPdf(
   mimeType: string,
   opts: ExtractionOptions = {}
 ): Promise<{ result: InvoiceExtraction; ocrText: string }> {
+  // #region agent log
+  writeDebugLog({
+    hypothesisId: "H3",
+    location: "src/lib/claude.ts:handleImageOrPdf",
+    message: "Entered image/pdf extraction",
+    data: {
+      mimeType,
+      bufferSize: buffer.length,
+      requiresFilesApi: mimeType === "application/pdf",
+    },
+    timestamp: Date.now(),
+  });
+  // #endregion
+
   const ocrClient = mimeType === "application/pdf"
     ? getClient({ requireFilesApi: true })
     : getClient();
@@ -289,8 +320,33 @@ async function handleImageOrPdf(
         purpose: "user_data" as any,
       });
       uploadedFileId = uploaded.id;
+      // #region agent log
+      writeDebugLog({
+        hypothesisId: "H2",
+        location: "src/lib/claude.ts:handleImageOrPdf",
+        message: "Uploaded PDF to OpenAI Files API",
+        data: {
+          uploadedFileIdPrefix: uploadedFileId.slice(0, 14),
+        },
+        timestamp: Date.now(),
+      });
+      // #endregion
       ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
     } catch (err) {
+      // #region agent log
+      writeDebugLog({
+        hypothesisId: "H2",
+        location: "src/lib/claude.ts:handleImageOrPdf",
+        message: "OpenAI PDF file upload failed",
+        data: {
+          status: typeof (err as { status?: unknown })?.status === "number"
+            ? (err as { status: number }).status
+            : null,
+          errorMessagePrefix: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        },
+        timestamp: Date.now(),
+      });
+      // #endregion
       const scopeMessage = formatFilesApiScopeError(err);
       if (scopeMessage) throw new Error(scopeMessage);
       throw err;

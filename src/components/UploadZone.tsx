@@ -11,6 +11,27 @@ interface UploadFile {
   error?: string;
 }
 
+function extractUploadErrorMessage(payload: unknown): string {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "results" in payload &&
+    Array.isArray((payload as { results?: unknown[] }).results)
+  ) {
+    const firstError = (payload as { results: Array<{ status?: string; error?: string }> }).results.find(
+      (r) => r.status === "error" && typeof r.error === "string" && r.error.trim().length > 0
+    );
+    if (firstError?.error) return firstError.error;
+  }
+
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const value = (payload as { error?: unknown }).error;
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+
+  return "Upload failed";
+}
+
 interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
@@ -78,14 +99,18 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         body: formData,
       });
 
-      if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        throw new Error(err.error ?? "Upload failed");
-      }
-
-      const data = await res.json() as {
+      const raw = await res.json() as unknown;
+      const data = raw as {
         results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
       };
+
+      if (!res.ok) {
+        throw new Error(extractUploadErrorMessage(raw));
+      }
+
+      if (!Array.isArray(data.results)) {
+        throw new Error(extractUploadErrorMessage(raw));
+      }
 
       const refs: string[] = [];
       setFiles((prev) =>
@@ -109,9 +134,10 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       onUploadComplete?.(refs);
     } catch (err) {
       console.error(err);
+      const fallbackMessage = err instanceof Error && err.message ? err.message : "Upload failed";
       setFiles((prev) =>
         prev.map((f) =>
-          f.status === "pending" ? { ...f, status: "error", error: "Upload failed" } : f
+          f.status === "pending" ? { ...f, status: "error", error: fallbackMessage } : f
         )
       );
     } finally {
