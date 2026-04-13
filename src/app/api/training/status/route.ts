@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import OpenAI from "openai";
+import { getOpenAIClient } from "@/lib/openai";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +13,11 @@ export const dynamic = "force-dynamic";
  *   - If still running → returns current status
  */
 export async function GET() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+  try {
+    getOpenAIClient({ requireFilesApi: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   const jobSetting = await prisma.setting.findUnique({ where: { organizationId_key: { organizationId: "default", key: "finetune_job_id" } } });
@@ -23,7 +25,7 @@ export async function GET() {
     return NextResponse.json({ status: "none", message: "No fine-tuning job has been started." });
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = getOpenAIClient({ requireFilesApi: true });
 
   try {
     const job = await client.fineTuning.jobs.retrieve(jobSetting.value);

@@ -1,10 +1,8 @@
-import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
+import { getOpenAIClient } from "@/lib/openai";
 
-let _client: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
+function getClient() {
+  return getOpenAIClient();
 }
 
 export interface MatchResult {

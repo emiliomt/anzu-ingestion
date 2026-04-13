@@ -18,6 +18,10 @@ cp .env.example .env
 Required:
 - `ANTHROPIC_API_KEY` — get from [console.anthropic.com](https://console.anthropic.com)
 - `DATABASE_URL` — defaults to SQLite (`file:./dev.db`), no setup needed
+- `OPENAI_API_KEY` — required for OCR/extraction features
+
+Recommended for full OpenAI capabilities:
+- `OPENAI_FULL_ACCESS_API_KEY` — use a key with Files API scopes (e.g. `api.files.write`) for PDF uploads and fine-tuning.
 
 Optional (for email and WhatsApp):
 - `SMTP_*` — for sending confirmation emails (use Mailtrap for dev)

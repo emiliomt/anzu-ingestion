@@ -47,6 +47,7 @@ services:
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_FULL_ACCESS_API_KEY: ${OPENAI_FULL_ACCESS_API_KEY:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_PATH: /app/uploads
@@ -85,6 +86,7 @@ services:
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_FULL_ACCESS_API_KEY: ${OPENAI_FULL_ACCESS_API_KEY:-}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_PATH: /app/uploads
       VAULT_KEY: ${VAULT_KEY:-}

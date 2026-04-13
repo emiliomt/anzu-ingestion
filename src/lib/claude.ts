@@ -14,13 +14,13 @@
  * the extraction pass uses the much cheaper gpt-4o-mini model.
  */
 
-import OpenAI from "openai";
 import sharp from "sharp";
 import { z } from "zod";
 import { bufferToBase64 } from "./utils";
 import { cleanOcrText } from "./ocr-cleaner";
 import { parseInvoiceXML } from "./xml-parser";
 import { EXTRACTION_SYSTEM_PROMPT, buildCustomFieldsSection, CustomFieldDef } from "./extraction-prompt";
+import { formatFilesApiScopeError, getOpenAIClient } from "./openai";
 
 // ── Extraction options (injected from app settings) ───────────────────────────
 export interface ExtractionOptions {
@@ -59,13 +59,9 @@ export interface ExtractionOptions {
   customFields?: CustomFieldDef[];
 }
 
-// ── OpenAI client (lazy — constructor must NOT run at Next.js build time) ─────
-let _client: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!_client) {
-    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return _client;
+// ── OpenAI client wrapper ──────────────────────────────────────────────────────
+function getClient(opts: { requireFilesApi?: boolean } = {}) {
+  return getOpenAIClient(opts);
 }
 
 const OCR_MODEL       = "gpt-4o";                    // vision — needed for image/PDF OCR
@@ -281,14 +277,20 @@ async function handleImageOrPdf(
   let uploadedFileId: string | null = null;
 
   if (mimeType === "application/pdf") {
-    const uploaded = await getClient().files.create({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      purpose: "user_data" as any,
-    });
-    uploadedFileId = uploaded.id;
-    ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
+    try {
+      const uploaded = await getClient({ requireFilesApi: true }).files.create({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        purpose: "user_data" as any,
+      });
+      uploadedFileId = uploaded.id;
+      ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
+    } catch (err) {
+      const scopeMessage = formatFilesApiScopeError(err);
+      if (scopeMessage) throw new Error(scopeMessage);
+      throw err;
+    }
   } else {
     const needsHeicTiffRaster =
       mimeType.includes("heic") ||
@@ -341,7 +343,7 @@ async function handleImageOrPdf(
   } finally {
     // Clean up uploaded PDF file regardless of OCR success/failure
     if (uploadedFileId) {
-      getClient().files.delete(uploadedFileId).catch(() => {});
+      getClient({ requireFilesApi: true }).files.delete(uploadedFileId).catch(() => {});
     }
   }
 
