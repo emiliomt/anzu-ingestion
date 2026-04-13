@@ -20,7 +20,9 @@ Docker daemon must be running first: `sudo dockerd &>/dev/null &` (wait ~3s befo
 
 - Copy `.env.example` to `.env` and configure. The default `DATABASE_URL` and `REDIS_URL` work with the Docker containers above.
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` must be a valid-format Clerk key (e.g. `pk_test_<base64>`) for the middleware to initialize. Without valid Clerk keys, the server routes return 200 but browser pages redirect to a non-existent Clerk domain. The admin dashboard at `/admin` requires real Clerk auth.
-- `ANTHROPIC_API_KEY` is needed for AI invoice extraction. Without it, uploads are received but extraction fails with `extraction_failed` flag.
+- Despite references to `ANTHROPIC_API_KEY` in docs and `.env.example`, the actual extraction pipeline in `src/lib/claude.ts` uses **OpenAI exclusively** (GPT-4o for OCR, GPT-4o-mini for structured extraction). `OPENAI_API_KEY` is what matters for extraction to work.
+- For **PDF** uploads, the code uses OpenAI's Files API (`files.create` with purpose `user_data`) which requires the `api.files.write` scope on the OpenAI key. If the key lacks this scope, PDF extraction fails but **image** uploads (PNG/JPG) work fine via base64 inline.
+- `ANTHROPIC_API_KEY` is accepted by the environment but not used by runtime code as of this writing.
 
 ### Key Commands
 
