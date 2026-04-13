@@ -32,6 +32,7 @@
     "@radix-ui/react-toast": "^1.2.2",
     "@radix-ui/react-tooltip": "^1.1.4",
     "@vercel/functions": "^3.4.3",
+    "adm-zip": "^0.5.17",
     "bullmq": "^5.13.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
@@ -54,6 +55,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.17.0",
     "@types/nodemailer": "^6.4.17",
     "@types/react": "^18.3.12",

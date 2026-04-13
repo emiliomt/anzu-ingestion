@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, FileText, Archive, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 
 interface UploadFile {
   file: File;
@@ -9,6 +9,7 @@ interface UploadFile {
   status: "pending" | "uploading" | "success" | "error";
   referenceNo?: string;
   error?: string;
+  isZip?: boolean;
 }
 
 interface UploadZoneProps {
@@ -19,9 +20,26 @@ interface UploadZoneProps {
   organizationId?: string;
 }
 
-const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp";
+type ResultItem = { referenceNo: string; fileName: string; status: string; error?: string };
+
+const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp,.zip";
 const MAX_SIZE = 20 * 1024 * 1024;
-const MAX_FILES = 10;
+const BATCH_SIZE = 10; // files per request to /api/upload
+
+function isZipFile(f: File): boolean {
+  return (
+    f.type === "application/zip" ||
+    f.type === "application/x-zip-compressed" ||
+    f.type === "application/x-zip" ||
+    f.name.toLowerCase().endsWith(".zip")
+  );
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size)
+  );
+}
 
 export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -31,21 +49,68 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
   const [isUploading, setIsUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successRefs, setSuccessRefs] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    filesUploaded: number;
+    filesTotal: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles);
-    const mapped: UploadFile[] = arr
-      .slice(0, MAX_FILES - files.length)
-      .map((f) => ({
+
+    // Check if the incoming set contains a ZIP mixed with other files
+    const zips = arr.filter(isZipFile);
+    const nonZips = arr.filter((f) => !isZipFile(f));
+
+    const mapped: UploadFile[] = [];
+
+    if (zips.length > 0 && nonZips.length > 0) {
+      // Mixed ZIP + regular files — reject the ZIPs with an error
+      zips.forEach((f) => mapped.push({
+        file: f,
+        id: Math.random().toString(36).slice(2),
+        status: "error",
+        isZip: true,
+        error: "Upload ZIP files separately from other files",
+      }));
+      nonZips.forEach((f) => mapped.push({
         file: f,
         id: Math.random().toString(36).slice(2),
         status: "pending",
-        error:
-          f.size > MAX_SIZE ? "File exceeds 20 MB limit" : undefined,
+        error: f.size > MAX_SIZE ? "File exceeds 20 MB limit" : undefined,
       }));
+    } else if (zips.length > 0 && nonZips.length === 0) {
+      // ZIP-only drop — only accept the first ZIP (one at a time)
+      const firstZip = zips[0];
+      mapped.push({
+        file: firstZip,
+        id: Math.random().toString(36).slice(2),
+        status: "pending",
+        isZip: true,
+      });
+      if (zips.length > 1) {
+        zips.slice(1).forEach((f) => mapped.push({
+          file: f,
+          id: Math.random().toString(36).slice(2),
+          status: "error",
+          isZip: true,
+          error: "Upload one ZIP at a time",
+        }));
+      }
+    } else {
+      // Regular files only — no total count cap
+      arr.forEach((f) => mapped.push({
+        file: f,
+        id: Math.random().toString(36).slice(2),
+        status: "pending",
+        error: f.size > MAX_SIZE ? "File exceeds 20 MB limit" : undefined,
+      }));
+    }
+
     setFiles((prev) => [...prev, ...mapped]);
-  }, [files.length]);
+  }, []);
 
   const removeFile = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
@@ -60,39 +125,108 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
     [addFiles]
   );
 
-  const handleUpload = async () => {
-    const validFiles = files.filter((f) => !f.error && f.status === "pending");
-    if (validFiles.length === 0) return;
-
+  /** Upload a ZIP file to /api/upload/unzip */
+  const handleZipUpload = async (zipFile: UploadFile) => {
     setIsUploading(true);
+    setFiles((prev) => prev.map((f) => f.id === zipFile.id ? { ...f, status: "uploading" } : f));
 
     const formData = new FormData();
+    formData.append("zip", zipFile.file);
     if (email) formData.append("email", email);
     if (name) formData.append("name", name);
     if (organizationId) formData.append("organizationId", organizationId);
-    validFiles.forEach((f) => formData.append("files", f.file));
 
     try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        throw new Error(err.error ?? "Upload failed");
-      }
-
+      const res = await fetch("/api/upload/unzip", { method: "POST", body: formData });
       const data = await res.json() as {
-        results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
+        results?: ResultItem[];
+        skipped?: string[];
+        error?: string;
       };
 
-      const refs: string[] = [];
-      setFiles((prev) =>
-        prev.map((f) => {
-          const result = data.results.find((r) => r.fileName === f.file.name);
-          if (result) {
-            if (result.status === "received") refs.push(result.referenceNo);
+      if (!res.ok || !data.results) {
+        setFiles((prev) => prev.map((f) =>
+          f.id === zipFile.id ? { ...f, status: "error", error: data.error ?? "ZIP upload failed" } : f
+        ));
+        return;
+      }
+
+      const refs = data.results.filter((r) => r.status === "received").map((r) => r.referenceNo);
+      const allFailed = refs.length === 0;
+
+      setFiles((prev) => prev.map((f) =>
+        f.id === zipFile.id
+          ? {
+              ...f,
+              status: allFailed ? "error" : "success",
+              error: allFailed ? "No files could be processed from this ZIP" : undefined,
+            }
+          : f
+      ));
+
+      if (refs.length > 0) {
+        setSuccessRefs(refs);
+        setSubmitted(true);
+        onUploadComplete?.(refs);
+      }
+    } catch {
+      setFiles((prev) => prev.map((f) =>
+        f.id === zipFile.id ? { ...f, status: "error", error: "Upload failed" } : f
+      ));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  /** Upload regular files to /api/upload in sequential batches of BATCH_SIZE */
+  const handleBatchUpload = async (validFiles: UploadFile[]) => {
+    const batches = chunk(validFiles, BATCH_SIZE);
+    setBatchProgress({ current: 0, total: batches.length, filesUploaded: 0, filesTotal: validFiles.length });
+    setIsUploading(true);
+    const allRefs: string[] = [];
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      setBatchProgress((prev) => prev ? { ...prev, current: i + 1 } : null);
+
+      setFiles((prev) => prev.map((f) =>
+        batch.some((b) => b.id === f.id) ? { ...f, status: "uploading" } : f
+      ));
+
+      const formData = new FormData();
+      if (email) formData.append("email", email);
+      if (name) formData.append("name", name);
+      if (organizationId) formData.append("organizationId", organizationId);
+      batch.forEach((f) => formData.append("files", f.file));
+
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: formData });
+        const data = await res.json() as { results?: ResultItem[]; error?: string };
+
+        if (res.status === 429) {
+          // Quota exhausted — mark this batch and all remaining pending files
+          setFiles((prev) => prev.map((f) => {
+            if (batch.some((b) => b.id === f.id) || f.status === "pending") {
+              return { ...f, status: "error", error: data.error ?? "Quota exceeded" };
+            }
+            return f;
+          }));
+          break; // stop sending further batches
+        }
+
+        if (!res.ok || !data.results) {
+          setFiles((prev) => prev.map((f) =>
+            batch.some((b) => b.id === f.id)
+              ? { ...f, status: "error", error: data.error ?? "Upload failed" }
+              : f
+          ));
+          continue; // proceed to next batch
+        }
+
+        setFiles((prev) => prev.map((f) => {
+          const result = data.results!.find((r) => r.fileName === f.file.name);
+          if (result && batch.some((b) => b.id === f.id)) {
+            if (result.status === "received") allRefs.push(result.referenceNo);
             return {
               ...f,
               status: result.status === "received" ? "success" : "error",
@@ -101,23 +235,41 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
             };
           }
           return f;
-        })
-      );
+        }));
 
-      setSuccessRefs(refs);
+        setBatchProgress((prev) =>
+          prev ? { ...prev, filesUploaded: prev.filesUploaded + batch.length } : null
+        );
+      } catch {
+        setFiles((prev) => prev.map((f) =>
+          batch.some((b) => b.id === f.id) ? { ...f, status: "error", error: "Upload failed" } : f
+        ));
+      }
+    }
+
+    setBatchProgress(null);
+    setIsUploading(false);
+    if (allRefs.length > 0) {
+      setSuccessRefs(allRefs);
       setSubmitted(true);
-      onUploadComplete?.(refs);
-    } catch (err) {
-      console.error(err);
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.status === "pending" ? { ...f, status: "error", error: "Upload failed" } : f
-        )
-      );
-    } finally {
-      setIsUploading(false);
+      onUploadComplete?.(allRefs);
     }
   };
+
+  const handleUpload = async () => {
+    const validFiles = files.filter((f) => !f.error && f.status === "pending");
+    if (validFiles.length === 0) return;
+
+    // ZIP mode: exactly one ZIP file queued
+    if (validFiles.length === 1 && validFiles[0].isZip) {
+      await handleZipUpload(validFiles[0]);
+      return;
+    }
+
+    await handleBatchUpload(validFiles);
+  };
+
+  const pendingCount = files.filter((f) => f.status === "pending" && !f.error).length;
 
   if (submitted && successRefs.length > 0) {
     return (
@@ -125,26 +277,32 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto">
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
-        <h3 className="text-xl font-semibold text-gray-900">Invoice Received!</h3>
+        <h3 className="text-xl font-semibold text-gray-900">
+          {successRefs.length === 1 ? "Invoice Received!" : `${successRefs.length} Invoices Received!`}
+        </h3>
         <p className="text-gray-500">
-          Your invoice has been received and is being processed.
+          {successRefs.length === 1
+            ? "Your invoice has been received and is being processed."
+            : `All ${successRefs.length} invoices have been received and are being processed.`}
           {email && " A confirmation email is on its way."}
         </p>
-        <div className="bg-indigo-50 rounded-lg p-4">
+        <div className="bg-indigo-50 rounded-lg p-4 max-h-48 overflow-y-auto">
           {successRefs.map((ref) => (
             <div key={ref} className="mb-2 last:mb-0">
               <p className="text-xs text-indigo-500 uppercase tracking-wider">Reference Number</p>
-              <p className="text-2xl font-bold text-indigo-700 tracking-wider">{ref}</p>
+              <p className="text-lg font-bold text-indigo-700 tracking-wider">{ref}</p>
             </div>
           ))}
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          {successRefs.map((ref) => (
-            <a key={ref} href={`/status/${ref}`} className="btn-secondary text-sm justify-center">
-              Track Status →
-            </a>
-          ))}
-        </div>
+        {successRefs.length <= 5 && (
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            {successRefs.map((ref) => (
+              <a key={ref} href={`/status/${ref}`} className="btn-secondary text-sm justify-center">
+                Track {ref} →
+              </a>
+            ))}
+          </div>
+        )}
         <button
           className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
           onClick={() => {
@@ -155,7 +313,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
             setName("");
           }}
         >
-          Submit another invoice
+          Submit more invoices
         </button>
       </div>
     );
@@ -193,21 +351,27 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB · Up to 10 files
+          PDF, PNG, JPG, HEIC, TIFF, WebP · ZIP archive · Max 20 MB per file
         </p>
       </div>
 
       {/* File list */}
       {files.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="space-y-2 max-h-80 overflow-y-auto">
           {files.map((f) => (
             <li
               key={f.id}
               className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-100"
             >
-              <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+              {f.isZip
+                ? <Archive className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                : <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+              }
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-700 truncate">{f.file.name}</p>
+                {f.isZip && f.status === "pending" && !f.error && (
+                  <p className="text-xs text-indigo-400">Will be extracted server-side</p>
+                )}
                 {f.error && (
                   <p className="text-xs text-red-500">{f.error}</p>
                 )}
@@ -223,9 +387,9 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
                   <X className="w-4 h-4" />
                 </button>
               )}
-              {f.status === "success" && <CheckCircle className="w-5 h-5 text-green-500" />}
-              {f.status === "error" && <AlertCircle className="w-5 h-5 text-red-500" />}
-              {f.status === "uploading" && <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />}
+              {f.status === "success" && <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />}
+              {f.status === "error" && <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />}
+              {f.status === "uploading" && <Loader2 className="w-5 h-5 text-indigo-500 animate-spin flex-shrink-0" />}
             </li>
           ))}
         </ul>
@@ -256,8 +420,30 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         </div>
       )}
 
+      {/* Batch progress bar */}
+      {batchProgress && (
+        <div className="space-y-1.5">
+          <p className="text-sm text-gray-600">
+            Uploading{" "}
+            {Math.min(batchProgress.current * BATCH_SIZE, batchProgress.filesTotal)} of{" "}
+            {batchProgress.filesTotal} files
+            <span className="text-gray-400">
+              {" "}· batch {batchProgress.current}/{batchProgress.total}
+            </span>
+          </p>
+          <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div
+              className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
+              style={{
+                width: `${Math.round((batchProgress.filesUploaded / batchProgress.filesTotal) * 100)}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Upload button */}
-      {files.some((f) => f.status === "pending" && !f.error) && (
+      {pendingCount > 0 && (
         <button
           onClick={handleUpload}
           disabled={isUploading}
@@ -266,13 +452,18 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           {isUploading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Uploading...
+              {batchProgress
+                ? `Uploading batch ${batchProgress.current}/${batchProgress.total}...`
+                : "Uploading..."
+              }
             </>
           ) : (
             <>
               <Upload className="w-4 h-4" />
-              Submit {files.filter((f) => f.status === "pending" && !f.error).length} Invoice
-              {files.filter((f) => f.status === "pending" && !f.error).length !== 1 ? "s" : ""}
+              {files.some((f) => f.status === "pending" && !f.error && f.isZip)
+                ? "Upload ZIP Archive"
+                : `Submit ${pendingCount} Invoice${pendingCount !== 1 ? "s" : ""}`
+              }
             </>
           )}
         </button>

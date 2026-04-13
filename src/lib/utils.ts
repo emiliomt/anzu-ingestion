@@ -34,6 +34,8 @@ export function mimeLabel(mime: string): string {
     "image/heic": "HEIC",
     "image/tiff": "TIFF",
     "image/webp": "WebP",
+    "application/zip": "ZIP",
+    "application/x-zip-compressed": "ZIP",
   };
   return map[mime] ?? mime;
 }
@@ -76,6 +78,15 @@ export function isValidMime(mime: string): boolean {
     "application/xml",
   ];
   return allowed.includes(mime);
+}
+
+/** Check if a MIME type is a ZIP container */
+export function isZipMime(mime: string): boolean {
+  return [
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/x-zip",
+  ].includes(mime);
 }
 
 /** Convert ArrayBuffer to base64 */
