@@ -89,9 +89,9 @@ function agentOcrDebugLog(entry: {
 
 const OCR_MODEL       = "gpt-4o";                    // vision — needed for image/PDF OCR
 const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap structured extraction
-const OCR_MAX_OUTPUT_TOKENS = 8192;
-const EXTRACTION_INPUT_CHAR_LIMIT = 12_000;
-const EXTRACT_MAX_OUTPUT_TOKENS = 4096;
+const OCR_MAX_OUTPUT_TOKENS = 16_384;
+const EXTRACTION_INPUT_CHAR_LIMIT = 48_000;
+const EXTRACT_MAX_OUTPUT_TOKENS = 16_384;
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -482,8 +482,12 @@ async function handleImageOrPdf(
   try {
     rawParsed = JSON.parse(cleaned);
   } catch {
+    const hint =
+      extractFinishReason === "length"
+        ? " (model output was truncated — finish_reason=length)"
+        : "";
     throw new Error(
-      `GPT-4o-mini returned invalid JSON. Raw response: ${raw.slice(0, 500)}`
+      `Extraction returned invalid JSON${hint}. Raw response (prefix): ${raw.slice(0, 1200)}`
     );
   }
 
