@@ -36,6 +36,9 @@ export async function POST(req: NextRequest) {
   await run('custom_fields.organizationId',  `ALTER TABLE custom_fields    ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
   await run('invoice_matches.organizationId',`ALTER TABLE invoice_matches  ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
   await run('erp_export_profiles.organizationId', `ALTER TABLE erp_export_profiles ADD COLUMN IF NOT EXISTS "organizationId" TEXT`);
+  // settings uses a composite PK (organizationId, key) — NOT NULL with default 'default'
+  await run('settings.organizationId',            `ALTER TABLE settings           ADD COLUMN IF NOT EXISTS "organizationId" TEXT NOT NULL DEFAULT 'default'`);
+  await run('idx settings.orgId',                 `CREATE INDEX IF NOT EXISTS "settings_organizationId_idx" ON settings("organizationId")`);
 
   // ── invoices: remaining missing columns ──────────────────────────────────────
   await run('invoices.paidAt',          `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP`);
