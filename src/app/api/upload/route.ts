@@ -54,6 +54,8 @@ type UploadInputFile = {
   buffer: Buffer;
 };
 
+const inlineExtractionChains = new Map<string, Promise<void>>();
+
 async function tryEnqueueInvoiceJob(input: {
   invoiceId: string;
   organizationId: string;
@@ -79,6 +81,50 @@ async function tryEnqueueInvoiceJob(input: {
     console.error(`[Upload] Queue enqueue failed for ${input.invoiceId}, falling back inline:`, err);
     return false;
   }
+}
+
+function scheduleInlineExtraction(params: {
+  invoiceId: string;
+  referenceNo: string;
+  buffer: Buffer;
+  mimeType: string;
+  submittedBy: string | null;
+  organizationId?: string | null;
+}) {
+  const chainKey = params.organizationId ?? "__anonymous__";
+  const prev = inlineExtractionChains.get(chainKey) ?? Promise.resolve();
+  const next = prev
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await processInvoice(
+          params.invoiceId,
+          params.referenceNo,
+          params.buffer,
+          params.mimeType,
+          params.submittedBy,
+          params.organizationId
+        );
+      } catch (err) {
+        console.error(`[Extract] Failed for invoice ${params.invoiceId}:`, err);
+        try {
+          await prisma.invoice.update({
+            where: { id: params.invoiceId },
+            data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+          });
+        } catch (updateErr) {
+          console.error(`[Extract] Failed to mark invoice ${params.invoiceId} as error:`, updateErr);
+        }
+      }
+    })
+    .finally(() => {
+      if (inlineExtractionChains.get(chainKey) === next) {
+        inlineExtractionChains.delete(chainKey);
+      }
+    });
+
+  inlineExtractionChains.set(chainKey, next);
+  scheduleBackground(next);
 }
 
 function mapUploadErrorMessage(err: unknown): string {
@@ -261,38 +307,26 @@ export async function POST(request: NextRequest) {
           mimeType: stored.mimeType,
         });
         if (!enqueued) {
-          scheduleBackground(
-            processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
-              console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
-              // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
-              // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
-              try {
-                await prisma.invoice.update({
-                  where: { id: invoice.id },
-                  data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
-                });
-              } catch (updateErr) {
-                console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
-              }
-            })
-          );
+          scheduleInlineExtraction({
+            invoiceId: invoice.id,
+            referenceNo,
+            buffer: file.buffer,
+            mimeType: stored.mimeType,
+            submittedBy,
+            organizationId,
+          });
         }
       } else if (expandedFiles.length <= MAX_ANONYMOUS_INLINE_FILES) {
         // Anonymous uploads cannot be queued because the queue payload requires organizationId.
         // Keep inline behavior for smaller batches.
-        scheduleBackground(
-          processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
-            console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
-            try {
-              await prisma.invoice.update({
-                where: { id: invoice.id },
-                data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
-              });
-            } catch (updateErr) {
-              console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
-            }
-          })
-        );
+        scheduleInlineExtraction({
+          invoiceId: invoice.id,
+          referenceNo,
+          buffer: file.buffer,
+          mimeType: stored.mimeType,
+          submittedBy,
+          organizationId,
+        });
       } else {
         results.push({
           referenceNo: "",
