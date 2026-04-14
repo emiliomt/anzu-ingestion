@@ -42,7 +42,10 @@ const MAX_FILES = 2500;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 const MAX_ZIP_ENTRIES = 2000;
 const MAX_ANONYMOUS_INLINE_FILES = 20;
-const QUEUE_ENQUEUE_TIMEOUT_MS = 2_500;
+const QUEUE_ENQUEUE_TIMEOUT_MS = Math.max(
+  1_500,
+  Number.parseInt(process.env.QUEUE_ENQUEUE_TIMEOUT_MS ?? "5000", 10) || 5_000
+);
 
 type UploadInputFile = {
   name: string;
@@ -57,6 +60,7 @@ async function tryEnqueueInvoiceJob(input: {
   fileUrl: string;
   mimeType: string;
 }): Promise<boolean> {
+  if (process.env.FORCE_QUEUE_INLINE_FALLBACK === "true") return false;
   if (!process.env.REDIS_URL) return false;
 
   try {

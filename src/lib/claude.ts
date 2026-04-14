@@ -345,12 +345,14 @@ async function handleImageOrPdf(
 
   if (mimeType === "application/pdf") {
     try {
-      const uploaded = await ocrClient.files.create({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        purpose: "user_data" as any,
-      });
+      const uploaded = await withOpenAiRetry("pdf-files-create", () =>
+        ocrClient.files.create({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          purpose: "user_data" as any,
+        })
+      );
       uploadedFileId = uploaded.id;
       ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
     } catch (err) {
