@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { FileText, Clock, AlertTriangle, Zap, TrendingUp, TrendingDown } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  FileText,
+  Clock,
+  AlertTriangle,
+  Zap,
+  TrendingUp,
+  TrendingDown,
+  CheckCircle2,
+  Gauge,
+  Layers3,
+} from "lucide-react";
 
 interface Metrics {
   total: number;
@@ -11,6 +21,26 @@ interface Metrics {
   flagged: number;
   duplicates: number;
   avgConfidence: number | null;
+  extractedByChannel?: { web: number; email: number; whatsapp: number };
+  oldestExtractedAt?: string | null;
+  extractedFlaggedCount?: number;
+  extractedCount?: number;
+  reviewQueueCount?: number;
+  processingCount?: number;
+  errorCount?: number;
+  lowConfidenceCount?: number;
+  successRate?: number;
+  errorRate?: number;
+}
+
+function formatAgeSince(dateIso: string | null | undefined): string {
+  if (!dateIso) return "No backlog";
+  const diffMs = Date.now() - new Date(dateIso).getTime();
+  const diffHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+  if (diffHours < 1) return "<1h oldest";
+  if (diffHours < 24) return `${diffHours}h oldest`;
+  const days = Math.floor(diffHours / 24);
+  return `${days}d oldest`;
 }
 
 export function MetricsPanel() {
@@ -48,10 +78,20 @@ export function MetricsPanel() {
     );
   }
 
-  const pending = metrics.byStatus?.pending ?? metrics.byStatus?.received ?? 0;
-  const confidence = metrics.avgConfidence != null
-    ? `${metrics.avgConfidence.toFixed(1)}%`
-    : "—";
+  const confidence = metrics.avgConfidence != null ? `${metrics.avgConfidence.toFixed(1)}%` : "—";
+  const successRateLabel = metrics.successRate != null ? `${metrics.successRate.toFixed(1)}%` : "—";
+  const errorRateLabel = metrics.errorRate != null ? `${metrics.errorRate.toFixed(1)}%` : "—";
+  const reviewQueue = metrics.reviewQueueCount ?? metrics.byStatus?.extracted ?? 0;
+  const processing = metrics.processingCount ?? metrics.byStatus?.processing ?? 0;
+  const lowConfidence = metrics.lowConfidenceCount ?? 0;
+  const oldestBacklogLabel = formatAgeSince(metrics.oldestExtractedAt);
+  const dominantChannel = useMemo(() => {
+    const channels = metrics.byChannel ?? { web: 0, email: 0, whatsapp: 0 };
+    const entries = Object.entries(channels) as Array<[keyof typeof channels, number]>;
+    entries.sort((a, b) => b[1] - a[1]);
+    const [name, count] = entries[0] ?? ["web", 0];
+    return `${name} ${count}`;
+  }, [metrics.byChannel]);
 
   const cards = [
     {
@@ -63,33 +103,65 @@ export function MetricsPanel() {
       trend: "up" as const,
     },
     {
-      label: "Pending",
-      value: String(pending),
-      sub: pending > 0 ? "Require review" : "All clear",
+      label: "Review Queue",
+      value: String(reviewQueue),
+      sub: oldestBacklogLabel,
       Icon: Clock,
       color: "#F59E0B",
-      trend: "neutral" as const,
+      trend: reviewQueue > 0 ? "down" as const : "up" as const,
     },
     {
-      label: "Exceptions",
-      value: String(metrics.flagged),
-      sub: metrics.flagged > 0 ? "Require attention" : "All clear",
+      label: "Error Rate",
+      value: errorRateLabel,
+      sub: `${metrics.errorCount ?? metrics.byStatus?.error ?? 0} failed`,
       Icon: AlertTriangle,
       color: "#EF4444",
+      trend: (metrics.errorRate ?? 0) > 10 ? "down" as const : "up" as const,
+    },
+    {
+      label: "AI Confidence",
+      value: confidence,
+      sub: `${lowConfidence} low-confidence`,
+      Icon: Zap,
+      color: "#10B981",
+      trend: "up" as const,
+    },
+    {
+      label: "Extraction Success",
+      value: successRateLabel,
+      sub: `${metrics.extractedCount ?? metrics.byStatus?.extracted ?? 0} extracted`,
+      Icon: CheckCircle2,
+      color: "#0EA5E9",
+      trend: (metrics.successRate ?? 0) >= 75 ? "up" as const : "down" as const,
+    },
+    {
+      label: "In Flight",
+      value: String(processing),
+      sub: processing > 0 ? "Currently processing" : "Idle",
+      Icon: Gauge,
+      color: "#A855F7",
+      trend: processing > 0 ? "neutral" as const : "up" as const,
+    },
+    {
+      label: "Flagged Records",
+      value: String(metrics.flagged),
+      sub: `${metrics.duplicates} duplicates`,
+      Icon: Layers3,
+      color: "#F43F5E",
       trend: metrics.flagged > 0 ? "down" as const : "up" as const,
     },
     {
-      label: "AI Accuracy",
-      value: confidence,
-      sub: "Avg extraction confidence",
-      Icon: Zap,
-      color: "#10B981",
+      label: "Top Channel",
+      value: dominantChannel,
+      sub: `${metrics.byChannel.web + metrics.byChannel.email + metrics.byChannel.whatsapp} today`,
+      Icon: TrendingUp,
+      color: "#14B8A6",
       trend: "up" as const,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-6 flex-shrink-0">
+    <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4 p-4 sm:p-6 flex-shrink-0">
       {cards.map(({ label, value, sub, Icon, color, trend }) => (
         <div
           key={label}
