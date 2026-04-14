@@ -44,13 +44,24 @@ export function createInvoiceWorker(redisUrl: string): Worker {
         throw new Error(`Invoice ${invoiceId} not found in database`);
       }
 
-      // Skip if already processed (e.g. job was retried but inline processing
-      // already succeeded in the interim)
-      if (invoice.status !== "processing" && invoice.status !== "received") {
+      // Allow retries to reprocess invoices that were marked "error" by a previous
+      // failed attempt. Keep skipping terminal successful statuses.
+      const isRetryAttempt = job.attemptsMade > 0;
+      const allowedStatuses = isRetryAttempt
+        ? new Set(["processing", "received", "error"])
+        : new Set(["processing", "received"]);
+      if (!allowedStatuses.has(invoice.status)) {
         console.log(
           `[invoice-worker] Skipping ${invoiceId} — already in status "${invoice.status}"`
         );
         return { invoiceId, status: invoice.status, skipped: true };
+      }
+
+      if (isRetryAttempt) {
+        await Promise.all([
+          prisma.extractedField.deleteMany({ where: { invoiceId } }),
+          prisma.lineItem.deleteMany({ where: { invoiceId } }),
+        ]);
       }
 
       await job.updateProgress(10);
@@ -68,7 +79,8 @@ export function createInvoiceWorker(redisUrl: string): Worker {
         buffer,
         mimeType,
         invoice.submittedBy,
-        organizationId
+        organizationId,
+        { rethrowOnError: true }
       );
 
       await job.updateProgress(100);
