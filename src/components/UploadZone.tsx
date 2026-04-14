@@ -44,6 +44,7 @@ const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 250;
 const UPLOAD_BATCH_SIZE = 10;
+const UPLOAD_MAX_CONCURRENCY = 1;
 
 type UploadApiResult = {
   referenceNo: string;
@@ -215,9 +216,12 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       }
     }
 
-    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE) {
-      const batch = validFiles.slice(i, i + UPLOAD_BATCH_SIZE);
-      await uploadBatch(batch);
+    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE * UPLOAD_MAX_CONCURRENCY) {
+      const group = validFiles.slice(i, i + UPLOAD_BATCH_SIZE * UPLOAD_MAX_CONCURRENCY);
+      for (let j = 0; j < group.length; j += UPLOAD_BATCH_SIZE) {
+        const batch = group.slice(j, j + UPLOAD_BATCH_SIZE);
+        await uploadBatch(batch);
+      }
     }
 
     setSuccessRefs(refs);
