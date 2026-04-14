@@ -123,18 +123,31 @@ export async function GET(request: NextRequest) {
   });
 }
 
-/** Batch delete invoices — admin only, scoped to current org */
+/** Batch delete invoices (or delete all) — admin only, scoped to current org */
 export async function DELETE(request: NextRequest) {
   try {
     const { orgId } = await requireAdmin();
 
-    const body = (await request.json()) as { ids: string[] };
+    const body = (await request.json().catch(() => ({}))) as {
+      ids?: string[];
+      deleteAll?: boolean;
+    };
+
+    // Only delete invoices belonging to the current org.
+    // Also match organizationId IS NULL for legacy rows uploaded before org-scoping was enforced.
+    if (body.deleteAll) {
+      const where = orgId
+        ? { OR: [{ organizationId: orgId }, { organizationId: null }] }
+        : {};
+
+      const { count } = await prisma.invoice.deleteMany({ where });
+      return NextResponse.json({ success: true, deleted: count, scope: "all" });
+    }
+
     if (!Array.isArray(body.ids) || body.ids.length === 0) {
       return NextResponse.json({ error: "ids array required" }, { status: 400 });
     }
 
-    // Only delete invoices belonging to the current org.
-    // Also match organizationId IS NULL for legacy rows uploaded before org-scoping was enforced.
     const where = orgId
       ? { id: { in: body.ids }, OR: [{ organizationId: orgId }, { organizationId: null }] }
       : { id: { in: body.ids } };

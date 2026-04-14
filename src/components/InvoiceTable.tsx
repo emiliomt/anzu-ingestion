@@ -33,6 +33,8 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
   // ERP export
   const [showErpModal, setShowErpModal] = useState(false);
@@ -109,6 +111,26 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
       console.error(err);
     } finally {
       setBulkDeleting(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    setDeletingAll(true);
+    try {
+      await fetch("/api/invoices", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteAll: true }),
+      });
+      setCheckedIds(new Set());
+      setConfirmDeleteAll(false);
+      setConfirmBulkDelete(false);
+      onBulkDeleted?.();
+      await fetchInvoices(1);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -201,6 +223,37 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
             <Download className="w-4 h-4" />
             Export
           </button>
+          {!confirmDeleteAll ? (
+            <button
+              onClick={() => {
+                setConfirmDeleteAll(true);
+                setConfirmBulkDelete(false);
+              }}
+              className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
+              title="Delete every invoice in this organization"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete all
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1">
+              <span className="text-xs text-red-700 font-medium">Delete ALL invoices?</span>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deletingAll}
+                className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {deletingAll ? "Deleting…" : "Yes"}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteAll(false)}
+                disabled={deletingAll}
+                className="text-xs px-2.5 py-1 border border-red-200 text-red-700 rounded-md hover:bg-red-100 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
