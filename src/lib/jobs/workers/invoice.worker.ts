@@ -3,7 +3,7 @@
 // Pipeline: download file → OCR + AI extraction → store fields → update status.
 //
 // Runs as a standalone process via workers/index.ts (NOT inside Next.js runtime).
-// Concurrency 3: each job calls the OpenAI API; CPU is not the bottleneck.
+// Defaults to sequential processing to avoid OpenAI burst failures in large batches.
 
 import { Worker, Job } from "bullmq";
 import { Redis } from "ioredis";
@@ -11,6 +11,11 @@ import { prisma } from "../../prisma";
 import { readFile } from "../../storage";
 import { processInvoicePipeline } from "../process-invoice";
 import type { InvoiceJobData } from "../queues";
+
+const INVOICE_WORKER_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.INVOICE_WORKER_CONCURRENCY ?? "1", 10) || 1
+);
 
 export function createInvoiceWorker(redisUrl: string): Worker {
   const connection = new Redis(redisUrl, {
@@ -82,7 +87,7 @@ export function createInvoiceWorker(redisUrl: string): Worker {
     },
     {
       connection,
-      concurrency: 3,
+      concurrency: INVOICE_WORKER_CONCURRENCY,
     }
   );
 }

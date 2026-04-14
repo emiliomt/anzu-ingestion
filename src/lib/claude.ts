@@ -69,6 +69,8 @@ const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap struc
 const OCR_MAX_OUTPUT_TOKENS = 16_384;
 const EXTRACTION_INPUT_CHAR_LIMIT = 48_000;
 const EXTRACT_MAX_OUTPUT_TOKENS = 16_384;
+const OPENAI_RETRY_ATTEMPTS = 4;
+const OPENAI_RETRY_BASE_DELAY_MS = 1200;
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -275,6 +277,46 @@ async function handleImageOrPdf(
     ? getClient({ requireFilesApi: true })
     : getClient();
   const extractClient = mimeType === "application/pdf" ? ocrClient : getClient();
+
+  async function withOpenAiRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    let attempt = 0;
+    let lastErr: unknown;
+    while (attempt < OPENAI_RETRY_ATTEMPTS) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const status = typeof (err as { status?: unknown })?.status === "number"
+          ? (err as { status: number }).status
+          : null;
+        const message = err instanceof Error ? err.message : String(err ?? "");
+        const lower = message.toLowerCase();
+        const retryable =
+          status === 429 ||
+          status === 408 ||
+          (status != null && status >= 500) ||
+          lower.includes("rate limit") ||
+          lower.includes("timeout") ||
+          lower.includes("temporarily unavailable") ||
+          lower.includes("overloaded");
+
+        attempt += 1;
+        if (!retryable || attempt >= OPENAI_RETRY_ATTEMPTS) {
+          break;
+        }
+
+        const jitter = Math.floor(Math.random() * 400);
+        const delayMs = OPENAI_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + jitter;
+        console.warn(
+          `[openai] ${label} failed (attempt ${attempt}/${OPENAI_RETRY_ATTEMPTS}) with status=${status ?? "n/a"}; retrying in ${delayMs}ms`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error(`[openai] ${label} failed after retries`);
+  }
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ocrParts: any[] = [];
@@ -334,15 +376,17 @@ async function handleImageOrPdf(
   // ── Step B: Call GPT-4o for OCR ───────────────────────────────────────
   let rawOcrText = "";
   try {
-    const ocrResp = await ocrClient.chat.completions.create({
-      model: OCR_MODEL,
-      max_tokens: OCR_MAX_OUTPUT_TOKENS,
-      temperature: 0,
-      messages: [
-        { role: "system", content: OCR_SYSTEM_PROMPT },
-        { role: "user", content: ocrParts },
-      ],
-    });
+    const ocrResp = await withOpenAiRetry("ocr-chat-completion", () =>
+      ocrClient.chat.completions.create({
+        model: OCR_MODEL,
+        max_tokens: OCR_MAX_OUTPUT_TOKENS,
+        temperature: 0,
+        messages: [
+          { role: "system", content: OCR_SYSTEM_PROMPT },
+          { role: "user", content: ocrParts },
+        ],
+      })
+    );
     rawOcrText = ocrResp.choices[0]?.message?.content ?? "";
   } finally {
     // Clean up uploaded PDF file regardless of OCR success/failure
@@ -375,21 +419,23 @@ async function handleImageOrPdf(
   const extractModel = opts.fineTunedModelId ?? EXTRACT_MODEL;
   const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
-  const extractResp = await Promise.race([
-    extractClient.chat.completions.create({
-      model: extractModel,
-      max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt + truncatedText },
-      ],
-    }),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-    ),
-  ]);
+  const extractResp = await withOpenAiRetry("structured-extraction", () =>
+    Promise.race([
+      extractClient.chat.completions.create({
+        model: extractModel,
+        max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt + truncatedText },
+        ],
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+      ),
+    ])
+  );
 
   const raw = extractResp.choices[0]?.message?.content ?? "";
   const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
