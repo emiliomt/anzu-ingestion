@@ -15,7 +15,6 @@ import { sendConfirmationEmail } from "@/lib/email";
 import { generateReferenceNo, isValidMime, isZipMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
-import { enqueueInvoice } from "@/lib/jobs/queues";
 
 // Allow Vercel serverless functions to keep running after response is sent
 // (waitUntil keeps background extraction alive on Vercel)
@@ -43,6 +42,7 @@ const MAX_FILES = 2500;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 const MAX_ZIP_ENTRIES = 2000;
 const MAX_ANONYMOUS_INLINE_FILES = 20;
+const QUEUE_ENQUEUE_TIMEOUT_MS = 2_500;
 
 type UploadInputFile = {
   name: string;
@@ -50,6 +50,32 @@ type UploadInputFile = {
   size: number;
   buffer: Buffer;
 };
+
+async function tryEnqueueInvoiceJob(input: {
+  invoiceId: string;
+  organizationId: string;
+  fileUrl: string;
+  mimeType: string;
+}): Promise<boolean> {
+  if (!process.env.REDIS_URL) return false;
+
+  try {
+    const { enqueueInvoice } = await import("@/lib/jobs/queues");
+    await Promise.race([
+      enqueueInvoice(input),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Queue enqueue timed out after ${QUEUE_ENQUEUE_TIMEOUT_MS}ms`)),
+          QUEUE_ENQUEUE_TIMEOUT_MS
+        )
+      ),
+    ]);
+    return true;
+  } catch (err) {
+    console.error(`[Upload] Queue enqueue failed for ${input.invoiceId}, falling back inline:`, err);
+    return false;
+  }
+}
 
 function mapUploadErrorMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err ?? "");
@@ -224,15 +250,13 @@ export async function POST(request: NextRequest) {
       });
 
       if (organizationId) {
-        try {
-          await enqueueInvoice({
-            invoiceId: invoice.id,
-            organizationId,
-            fileUrl: stored.url,
-            mimeType: stored.mimeType,
-          });
-        } catch (queueErr) {
-          console.error(`[Upload] Queue enqueue failed for ${invoice.id}, falling back inline:`, queueErr);
+        const enqueued = await tryEnqueueInvoiceJob({
+          invoiceId: invoice.id,
+          organizationId,
+          fileUrl: stored.url,
+          mimeType: stored.mimeType,
+        });
+        if (!enqueued) {
           scheduleBackground(
             processInvoice(invoice.id, referenceNo, file.buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
               console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
