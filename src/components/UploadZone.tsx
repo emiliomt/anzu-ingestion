@@ -43,6 +43,7 @@ interface UploadZoneProps {
 const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 250;
+const UPLOAD_BATCH_SIZE = 25;
 
 export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -86,63 +87,104 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
     if (validFiles.length === 0) return;
 
     setIsUploading(true);
+    const ids = new Set(validFiles.map((f) => f.id));
+    setFiles((prev) =>
+      prev.map((f) =>
+        ids.has(f.id)
+          ? { ...f, status: "uploading", error: undefined }
+          : f
+      )
+    );
 
-    const formData = new FormData();
-    if (email) formData.append("email", email);
-    if (name) formData.append("name", name);
-    if (organizationId) formData.append("organizationId", organizationId);
-    validFiles.forEach((f) => formData.append("files", f.file));
+    const refs: string[] = [];
 
-    try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const raw = await res.json() as unknown;
-      const data = raw as {
-        results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
-      };
-
-      if (!res.ok) {
-        throw new Error(extractUploadErrorMessage(raw));
+    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE) {
+      const batch = validFiles.slice(i, i + UPLOAD_BATCH_SIZE);
+      const batchByName = new Map<string, UploadFile[]>();
+      for (const fileItem of batch) {
+        const arr = batchByName.get(fileItem.file.name) ?? [];
+        arr.push(fileItem);
+        batchByName.set(fileItem.file.name, arr);
       }
 
-      if (!Array.isArray(data.results)) {
-        throw new Error(extractUploadErrorMessage(raw));
-      }
+      const formData = new FormData();
+      if (email) formData.append("email", email);
+      if (name) formData.append("name", name);
+      if (organizationId) formData.append("organizationId", organizationId);
+      batch.forEach((f) => formData.append("files", f.file));
 
-      const refs: string[] = [];
-      setFiles((prev) =>
-        prev.map((f) => {
-          const result = data.results.find((r) => r.fileName === f.file.name);
-          if (result) {
-            if (result.status === "received") refs.push(result.referenceNo);
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const raw = await res.json() as unknown;
+        const data = raw as {
+          results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
+        };
+
+        if (!res.ok || !Array.isArray(data.results)) {
+          throw new Error(extractUploadErrorMessage(raw));
+        }
+
+        const resultById = new Map<string, {
+          status: "success" | "error";
+          referenceNo?: string;
+          error?: string;
+        }>();
+
+        for (const r of data.results) {
+          const matches = batchByName.get(r.fileName);
+          const target = matches?.shift();
+          if (!target) continue;
+
+          if (r.status === "received") {
+            refs.push(r.referenceNo);
+            resultById.set(target.id, {
+              status: "success",
+              referenceNo: r.referenceNo,
+            });
+          } else {
+            resultById.set(target.id, {
+              status: "error",
+              error: r.error ?? "Upload failed",
+            });
+          }
+        }
+
+        setFiles((prev) =>
+          prev.map((f) => {
+            const mapped = resultById.get(f.id);
+            if (!mapped) return f;
             return {
               ...f,
-              status: result.status === "received" ? "success" : "error",
-              referenceNo: result.referenceNo,
-              error: result.error,
+              status: mapped.status,
+              referenceNo: mapped.referenceNo,
+              error: mapped.error,
             };
-          }
-          return f;
-        })
-      );
-
-      setSuccessRefs(refs);
-      setSubmitted(true);
-      onUploadComplete?.(refs);
-    } catch (err) {
-      console.error(err);
-      const fallbackMessage = err instanceof Error && err.message ? err.message : "Upload failed";
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.status === "pending" ? { ...f, status: "error", error: fallbackMessage } : f
-        )
-      );
-    } finally {
-      setIsUploading(false);
+          })
+        );
+      } catch (err) {
+        console.error(err);
+        const fallbackMessage = err instanceof Error && err.message
+          ? err.message
+          : "Upload failed";
+        const failedIds = new Set(batch.map((f) => f.id));
+        setFiles((prev) =>
+          prev.map((f) =>
+            failedIds.has(f.id)
+              ? { ...f, status: "error", error: fallbackMessage }
+              : f
+          )
+        );
+      }
     }
+
+    setSuccessRefs(refs);
+    setSubmitted(true);
+    onUploadComplete?.(refs);
+    setIsUploading(false);
   };
 
   if (submitted && successRefs.length > 0) {
