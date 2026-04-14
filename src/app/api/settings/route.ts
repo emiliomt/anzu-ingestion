@@ -34,6 +34,10 @@ export async function POST(req: Request) {
     // Coerce every value to string for the key-value store
     const partial: Record<string, string> = {};
     for (const [key, val] of Object.entries(body)) {
+      // Do not overwrite active fine-tune model ID with null from unrelated settings saves.
+      if (key === "finetune_model_id" && (val === null || val === undefined || val === "null" || val === "")) {
+        continue;
+      }
       if (val === null || val === undefined) {
         partial[key] = "null";
       } else if (Array.isArray(val)) {
