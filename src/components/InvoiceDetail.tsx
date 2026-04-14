@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import {
   X, ExternalLink, CheckCircle, Edit2, Save, AlertTriangle,
   FileText, Calendar, DollarSign, Hash, Clock, Sparkles, Loader2, GitMerge,
-  BookMarked, Trash2,
+  BookMarked, Trash2, RotateCcw,
 } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceDetail as InvoiceDetailType, ExtractedFieldData } from "@/types/invoice";
@@ -48,6 +48,7 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const [savingGT, setSavingGT] = useState(false);
   const [gtToast, setGtToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [matchLabel, setMatchLabel] = useState<string | null>(null);
@@ -187,6 +188,32 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
       console.error("[Classify]", err);
     } finally {
       setClassifying(false);
+    }
+  };
+
+  const handleRerunExtraction = async () => {
+    setRerunning(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/rerun`, { method: "POST" });
+      const payload = await res.json().catch(() => ({} as { error?: string; message?: string }));
+      if (!res.ok) {
+        throw new Error(payload.error ?? "Re-run extraction failed");
+      }
+      // Mark as processing in UI immediately; user can refresh or wait for list poll.
+      setInvoice((prev) => prev ? { ...prev, status: "processing" } : prev);
+      setGtToast({
+        type: "success",
+        text: payload.message ?? "Extraction re-run queued.",
+      });
+      onStatusChange?.();
+    } catch (err) {
+      setGtToast({
+        type: "error",
+        text: err instanceof Error ? err.message : "Re-run extraction failed",
+      });
+    } finally {
+      setRerunning(false);
+      setTimeout(() => setGtToast(null), 4000);
     }
   };
 
@@ -361,6 +388,17 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
 
               {/* ── Ground-truth capture ── */}
               <div className="h-4 w-px bg-gray-200 mx-1" aria-hidden />
+              <button
+                onClick={handleRerunExtraction}
+                disabled={rerunning}
+                title="Re-run OCR + extraction for this invoice"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+              >
+                {rerunning
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <RotateCcw className="w-3 h-3" />}
+                {rerunning ? "Re-running…" : "Re-run extraction"}
+              </button>
               <button
                 onClick={handleSaveGroundTruth}
                 disabled={savingGT}
