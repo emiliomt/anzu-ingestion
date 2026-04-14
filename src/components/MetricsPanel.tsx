@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FileText,
   Clock,
@@ -85,13 +85,11 @@ export function MetricsPanel() {
   const processing = metrics.processingCount ?? metrics.byStatus?.processing ?? 0;
   const lowConfidence = metrics.lowConfidenceCount ?? 0;
   const oldestBacklogLabel = formatAgeSince(metrics.oldestExtractedAt);
-  const dominantChannel = useMemo(() => {
-    const channels = metrics.byChannel ?? { web: 0, email: 0, whatsapp: 0 };
-    const entries = Object.entries(channels) as Array<[keyof typeof channels, number]>;
-    entries.sort((a, b) => b[1] - a[1]);
-    const [name, count] = entries[0] ?? ["web", 0];
-    return `${name} ${count}`;
-  }, [metrics.byChannel]);
+  const channels = metrics.byChannel ?? { web: 0, email: 0, whatsapp: 0 };
+  const entries = Object.entries(channels) as Array<[keyof typeof channels, number]>;
+  entries.sort((a, b) => b[1] - a[1]);
+  const [topChannelName, topChannelCount] = entries[0] ?? ["web", 0];
+  const dominantChannel = `${topChannelName} ${topChannelCount}`;
 
   const cards = [
     {
@@ -153,7 +151,7 @@ export function MetricsPanel() {
     {
       label: "Top Channel",
       value: dominantChannel,
-      sub: `${metrics.byChannel.web + metrics.byChannel.email + metrics.byChannel.whatsapp} today`,
+      sub: `${channels.web + channels.email + channels.whatsapp} today`,
       Icon: TrendingUp,
       color: "#14B8A6",
       trend: "up" as const,
