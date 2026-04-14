@@ -43,7 +43,35 @@ interface UploadZoneProps {
 const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 250;
-const UPLOAD_BATCH_SIZE = 25;
+const UPLOAD_BATCH_SIZE = 10;
+
+type UploadApiResult = {
+  referenceNo: string;
+  fileName: string;
+  status: string;
+  error?: string;
+};
+
+type UploadApiResponse = {
+  results?: UploadApiResult[];
+  error?: string;
+};
+
+async function parseUploadResponse(res: Response): Promise<UploadApiResponse> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { error: `Empty server response (${res.status})` };
+  }
+
+  try {
+    return JSON.parse(text) as UploadApiResponse;
+  } catch {
+    const preview = text.slice(0, 120).replace(/\s+/g, " ").trim();
+    return {
+      error: `Server returned non-JSON response (${res.status}): ${preview || "no response body"}`,
+    };
+  }
+}
 
 export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -98,8 +126,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
 
     const refs: string[] = [];
 
-    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE) {
-      const batch = validFiles.slice(i, i + UPLOAD_BATCH_SIZE);
+    async function uploadBatch(batch: UploadFile[]) {
       const batchByName = new Map<string, UploadFile[]>();
       for (const fileItem of batch) {
         const arr = batchByName.get(fileItem.file.name) ?? [];
@@ -119,10 +146,8 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           body: formData,
         });
 
-        const raw = await res.json() as unknown;
-        const data = raw as {
-          results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
-        };
+        const raw = await parseUploadResponse(res);
+        const data = raw as { results: UploadApiResult[] };
 
         if (!res.ok || !Array.isArray(data.results)) {
           throw new Error(extractUploadErrorMessage(raw));
@@ -167,6 +192,15 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         );
       } catch (err) {
         console.error(err);
+
+        // Automatically split failed batches to reduce payload/timeout failures.
+        if (batch.length > 1) {
+          const midpoint = Math.ceil(batch.length / 2);
+          await uploadBatch(batch.slice(0, midpoint));
+          await uploadBatch(batch.slice(midpoint));
+          return;
+        }
+
         const fallbackMessage = err instanceof Error && err.message
           ? err.message
           : "Upload failed";
@@ -179,6 +213,11 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           )
         );
       }
+    }
+
+    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE) {
+      const batch = validFiles.slice(i, i + UPLOAD_BATCH_SIZE);
+      await uploadBatch(batch);
     }
 
     setSuccessRefs(refs);
