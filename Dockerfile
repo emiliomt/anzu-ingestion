@@ -15,8 +15,6 @@ RUN npm ci
 COPY . .
 # Switch Prisma provider to PostgreSQL for production build
 RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
-# Generate Prisma client before building
-RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 # Enable Next.js standalone output (required for Docker deployment)
 ENV NEXT_OUTPUT=standalone

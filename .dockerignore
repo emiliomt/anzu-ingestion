@@ -14,3 +14,11 @@ yarn-error.log*
 nul
 anzuwebsite-src
 test-files
+.git
+.github
+.cursor
+**/*.log
+**/*.tmp
+agent-tools
+coverage
+tmp
