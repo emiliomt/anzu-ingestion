@@ -20,6 +20,11 @@ interface PaginationData {
   totalPages: number;
 }
 
+function shortenModelLabel(modelId: string): string {
+  if (modelId.length <= 24) return modelId;
+  return `${modelId.slice(0, 21)}...`;
+}
+
 export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDeleted }: InvoiceTableProps) {
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [pagination, setPagination] = useState<PaginationData>({
@@ -42,6 +47,21 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
   const [selectedErpProfileId, setSelectedErpProfileId] = useState<string>("sinco");
   const [erpExporting, setErpExporting] = useState(false);
   const [erpToast, setErpToast] = useState<string | null>(null);
+  const [activeModelId, setActiveModelId] = useState<string | null>(null);
+
+  const fetchActiveModel = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json() as { finetune_model_id?: string | null };
+      const modelId = typeof data.finetune_model_id === "string" && data.finetune_model_id.trim()
+        ? data.finetune_model_id.trim()
+        : null;
+      setActiveModelId(modelId);
+    } catch (err) {
+      console.error("Failed to fetch active extraction model:", err);
+    }
+  }, []);
 
   const fetchInvoices = useCallback(async (page = 1) => {
     setLoading(true);
@@ -72,6 +92,12 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, statusFilter, channelFilter, flaggedOnly, refreshKey]);
+
+  useEffect(() => {
+    fetchActiveModel();
+    const interval = setInterval(fetchActiveModel, 30000);
+    return () => clearInterval(interval);
+  }, [fetchActiveModel]);
 
   // Clear selection when the list refreshes
   useEffect(() => { setCheckedIds(new Set()); }, [refreshKey]);
@@ -290,9 +316,23 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
             />
             Flagged only
           </label>
-          <span className="ml-auto text-xs text-gray-400">
-            {pagination.total} invoices
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <span
+              title={activeModelId ?? "gpt-4.1-mini-2025-04-14"}
+              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                activeModelId
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-gray-200 bg-gray-50 text-gray-600"
+              }`}
+            >
+              {activeModelId
+                ? `Model: ${shortenModelLabel(activeModelId)}`
+                : "Model: Base"}
+            </span>
+            <span className="text-xs text-gray-400">
+              {pagination.total} invoices
+            </span>
+          </div>
         </div>
 
         {/* Bulk actions bar */}
