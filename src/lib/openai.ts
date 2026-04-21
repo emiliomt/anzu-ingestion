@@ -10,7 +10,6 @@ function resolveApiKey(requireFilesApi: boolean): string | null {
   const defaultKey = readTrimmedEnv("OPENAI_API_KEY");
   return requireFilesApi ? fullAccessKey ?? defaultKey : defaultKey ?? fullAccessKey;
 }
-
 const clientCache = new Map<string, OpenAI>();
 
 export function getOpenAIClient(opts: { requireFilesApi?: boolean } = {}): OpenAI {

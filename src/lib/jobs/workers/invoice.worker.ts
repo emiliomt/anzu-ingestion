@@ -3,7 +3,7 @@
 // Pipeline: download file → OCR + AI extraction → store fields → update status.
 //
 // Runs as a standalone process via workers/index.ts (NOT inside Next.js runtime).
-// Concurrency 3: each job calls the OpenAI API; CPU is not the bottleneck.
+// Defaults to sequential processing to avoid OpenAI burst failures in large batches.
 
 import { Worker, Job } from "bullmq";
 import { Redis } from "ioredis";
@@ -11,6 +11,11 @@ import { prisma } from "../../prisma";
 import { readFile } from "../../storage";
 import { processInvoicePipeline } from "../process-invoice";
 import type { InvoiceJobData } from "../queues";
+
+const INVOICE_WORKER_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.INVOICE_WORKER_CONCURRENCY ?? "1", 10) || 1
+);
 
 export function createInvoiceWorker(redisUrl: string): Worker {
   const connection = new Redis(redisUrl, {
@@ -39,13 +44,24 @@ export function createInvoiceWorker(redisUrl: string): Worker {
         throw new Error(`Invoice ${invoiceId} not found in database`);
       }
 
-      // Skip if already processed (e.g. job was retried but inline processing
-      // already succeeded in the interim)
-      if (invoice.status !== "processing" && invoice.status !== "received") {
+      // Allow retries to reprocess invoices that were marked "error" by a previous
+      // failed attempt. Keep skipping terminal successful statuses.
+      const isRetryAttempt = job.attemptsMade > 0;
+      const allowedStatuses = isRetryAttempt
+        ? new Set(["processing", "received", "error"])
+        : new Set(["processing", "received"]);
+      if (!allowedStatuses.has(invoice.status)) {
         console.log(
           `[invoice-worker] Skipping ${invoiceId} — already in status "${invoice.status}"`
         );
         return { invoiceId, status: invoice.status, skipped: true };
+      }
+
+      if (isRetryAttempt) {
+        await Promise.all([
+          prisma.extractedField.deleteMany({ where: { invoiceId } }),
+          prisma.lineItem.deleteMany({ where: { invoiceId } }),
+        ]);
       }
 
       await job.updateProgress(10);
@@ -63,7 +79,8 @@ export function createInvoiceWorker(redisUrl: string): Worker {
         buffer,
         mimeType,
         invoice.submittedBy,
-        organizationId
+        organizationId,
+        { rethrowOnError: true }
       );
 
       await job.updateProgress(100);
@@ -82,7 +99,7 @@ export function createInvoiceWorker(redisUrl: string): Worker {
     },
     {
       connection,
-      concurrency: 3,
+      concurrency: INVOICE_WORKER_CONCURRENCY,
     }
   );
 }

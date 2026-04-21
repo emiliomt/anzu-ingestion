@@ -13,6 +13,13 @@
 
 import { prisma } from "./prisma";
 
+function readTrimmedEnv(key: string): string | null {
+  const value = process.env[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface AppSettings {
@@ -79,6 +86,8 @@ export const SETTING_DEFAULTS: AppSettings = {
   extraction_fields:          [...ALL_EXTRACTION_FIELDS],
   preferred_erp:              null,
 };
+
+const DEFAULT_FINETUNE_MODEL_ID = readTrimmedEnv("OPENAI_FINETUNE_MODEL_ID");
 
 // ── Country → default currency map ────────────────────────────────────────────
 
@@ -157,7 +166,7 @@ export async function getSettings(organizationId?: string | null): Promise<AppSe
     finetune_model_id:
       get("finetune_model_id") !== undefined && get("finetune_model_id") !== ""
         ? get("finetune_model_id")!
-        : SETTING_DEFAULTS.finetune_model_id,
+        : (DEFAULT_FINETUNE_MODEL_ID ?? SETTING_DEFAULTS.finetune_model_id),
 
     extraction_fields: (() => {
       const raw = get("extraction_fields");

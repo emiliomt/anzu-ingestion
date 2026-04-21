@@ -5,13 +5,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import JSZip from "jszip";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
 import { buildFewShotSection } from "@/lib/few-shot";
 import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
-import { generateReferenceNo, isValidMime } from "@/lib/utils";
+import { generateReferenceNo, isValidMime, isZipMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
 
@@ -37,8 +38,123 @@ function scheduleBackground(promise: Promise<void>) {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if needed
 
-const MAX_FILES = 10;
+const MAX_FILES = 2500;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_ZIP_ENTRIES = 2000;
+const MAX_ANONYMOUS_INLINE_FILES = 20;
+const QUEUE_ENQUEUE_TIMEOUT_MS = Math.max(
+  1_500,
+  Number.parseInt(process.env.QUEUE_ENQUEUE_TIMEOUT_MS ?? "5000", 10) || 5_000
+);
+
+type UploadInputFile = {
+  name: string;
+  type: string;
+  size: number;
+  buffer: Buffer;
+};
+
+const inlineExtractionChains = new Map<string, Promise<void>>();
+
+async function tryEnqueueInvoiceJob(input: {
+  invoiceId: string;
+  organizationId: string;
+  fileUrl: string;
+  mimeType: string;
+}): Promise<boolean> {
+  if (process.env.FORCE_QUEUE_INLINE_FALLBACK === "true") return false;
+  if (!process.env.REDIS_URL) return false;
+
+  try {
+    const { enqueueInvoice } = await import("@/lib/jobs/queues");
+    await Promise.race([
+      enqueueInvoice(input),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Queue enqueue timed out after ${QUEUE_ENQUEUE_TIMEOUT_MS}ms`)),
+          QUEUE_ENQUEUE_TIMEOUT_MS
+        )
+      ),
+    ]);
+    return true;
+  } catch (err) {
+    console.error(`[Upload] Queue enqueue failed for ${input.invoiceId}, falling back inline:`, err);
+    return false;
+  }
+}
+
+function scheduleInlineExtraction(params: {
+  invoiceId: string;
+  referenceNo: string;
+  buffer: Buffer;
+  mimeType: string;
+  submittedBy: string | null;
+  organizationId?: string | null;
+}) {
+  const chainKey = params.organizationId ?? "__anonymous__";
+  const prev = inlineExtractionChains.get(chainKey) ?? Promise.resolve();
+  const next = prev
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await processInvoice(
+          params.invoiceId,
+          params.referenceNo,
+          params.buffer,
+          params.mimeType,
+          params.submittedBy,
+          params.organizationId
+        );
+      } catch (err) {
+        console.error(`[Extract] Failed for invoice ${params.invoiceId}:`, err);
+        try {
+          await prisma.invoice.update({
+            where: { id: params.invoiceId },
+            data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
+          });
+        } catch (updateErr) {
+          console.error(`[Extract] Failed to mark invoice ${params.invoiceId} as error:`, updateErr);
+        }
+      }
+    })
+    .finally(() => {
+      if (inlineExtractionChains.get(chainKey) === next) {
+        inlineExtractionChains.delete(chainKey);
+      }
+    });
+
+  inlineExtractionChains.set(chainKey, next);
+  scheduleBackground(next);
+}
+
+function mapUploadErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const lower = message.toLowerCase();
+  const code = typeof (err as { code?: unknown })?.code === "string"
+    ? (err as { code: string }).code
+    : null;
+
+  if (
+    lower.includes("can't reach database server") ||
+    lower.includes("database server is running at")
+  ) {
+    return "Upload could not be saved because the database is unreachable. Please retry shortly. If this keeps happening, verify DATABASE_URL connectivity.";
+  }
+
+  if (code === "P2021" || lower.includes("does not exist in the current database")) {
+    return "Upload could not be saved because database tables are not ready. Run Prisma migrations/db push and retry.";
+  }
+
+  if (
+    lower.includes("api.files.write") ||
+    lower.includes("openai key not configured for files api") ||
+    lower.includes("insufficient_scope")
+  ) {
+    return "PDF processing key is missing OpenAI Files API access (api.files.write). Configure OPENAI_FULL_ACCESS_API_KEY with full capabilities.";
+  }
+
+  return "Processing failed. Please try again.";
+}
 
 export async function POST(request: NextRequest) {
   let formData: FormData;
@@ -72,22 +188,19 @@ export async function POST(request: NextRequest) {
   }
   if (!organizationId && formOrgId) organizationId = formOrgId;
 
-  // Enforce per-org monthly quota (unauthenticated uploads are always allowed).
+  // Quota checks are informational only; uploads are never blocked.
   // Wrapped in try/catch so a missing subscriptions table (e.g. first deploy before
-  // prisma db push finishes) fails open rather than blocking all uploads.
+  // prisma db push finishes) still allows uploads.
   try {
     const quota = await checkQuotaOrNull(organizationId);
     if (!quota.allowed) {
-      return NextResponse.json(
-        {
-          error: `Monthly quota exceeded. Your ${quota.plan} plan allows ${quota.limit} invoices per month. Used: ${quota.used}. Quota resets on ${new Date(quota.resetAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
-          quota,
-        },
-        { status: 429 }
+      console.warn(
+        `[Upload] quota exceeded for org ${organizationId ?? "none"} ` +
+        `(plan=${quota.plan}, used=${quota.used}, limit=${quota.limit}) — allowing upload`
       );
     }
   } catch (quotaErr) {
-    // Non-fatal — log and continue; quota enforcement resumes once DB schema is in sync
+    // Non-fatal — log and continue
     console.warn("[Upload] quota check failed (schema may be out of sync):", quotaErr);
   }
 
@@ -102,6 +215,25 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let expandedFiles: UploadInputFile[];
+  try {
+    expandedFiles = await expandIncomingFiles(files);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  if (expandedFiles.length === 0) {
+    return NextResponse.json({ error: "No supported files found in upload." }, { status: 400 });
+  }
+
+  if (expandedFiles.length > MAX_FILES) {
+    return NextResponse.json(
+      { error: `Expanded upload contains ${expandedFiles.length} files. Maximum is ${MAX_FILES}.` },
+      { status: 400 }
+    );
+  }
+
   const results: Array<{
     referenceNo: string;
     fileName: string;
@@ -109,7 +241,7 @@ export async function POST(request: NextRequest) {
     error?: string;
   }> = [];
 
-  for (const file of files) {
+  for (const file of expandedFiles) {
     try {
       if (!isValidMime(file.type)) {
         results.push({
@@ -131,8 +263,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const stored = await storeFile(buffer, file.name, file.type, "web");
+      const stored = await storeFile(file.buffer, file.name, file.type, "web");
       const referenceNo = generateReferenceNo();
 
       // Find or create vendor
@@ -168,32 +299,55 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Run extraction asynchronously — uses waitUntil on Vercel, fire-and-forget on Railway/local
-      scheduleBackground(
-        processInvoice(invoice.id, referenceNo, buffer, stored.mimeType, submittedBy, organizationId).catch(async (err) => {
-          console.error(`[Extract] Failed for invoice ${invoice.id}:`, err);
-          // Fallback: if processInvoice's own catch block threw (e.g. DB unavailable before
-          // the try/catch was entered), ensure the invoice is not stuck in "processing" forever.
-          try {
-            await prisma.invoice.update({
-              where: { id: invoice.id },
-              data: { status: "error", flags: JSON.stringify(["extraction_failed"]) },
-            });
-          } catch (updateErr) {
-            console.error(`[Extract] Failed to mark invoice ${invoice.id} as error:`, updateErr);
-          }
-        })
-      );
+      if (organizationId) {
+        const enqueued = await tryEnqueueInvoiceJob({
+          invoiceId: invoice.id,
+          organizationId,
+          fileUrl: stored.url,
+          mimeType: stored.mimeType,
+        });
+        if (!enqueued) {
+          scheduleInlineExtraction({
+            invoiceId: invoice.id,
+            referenceNo,
+            buffer: file.buffer,
+            mimeType: stored.mimeType,
+            submittedBy,
+            organizationId,
+          });
+        }
+      } else if (expandedFiles.length <= MAX_ANONYMOUS_INLINE_FILES) {
+        // Anonymous uploads cannot be queued because the queue payload requires organizationId.
+        // Keep inline behavior for smaller batches.
+        scheduleInlineExtraction({
+          invoiceId: invoice.id,
+          referenceNo,
+          buffer: file.buffer,
+          mimeType: stored.mimeType,
+          submittedBy,
+          organizationId,
+        });
+      } else {
+        results.push({
+          referenceNo: "",
+          fileName: file.name,
+          status: "error",
+          error:
+            "Large batch extraction requires organization context. Sign in to an organization workspace or split into smaller batches.",
+        });
+        continue;
+      }
 
       results.push({ referenceNo, fileName: file.name, status: "received" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const actionableError = mapUploadErrorMessage(err);
       console.error(`[Upload] Error processing file "${file.name}":`, msg, err);
       results.push({
         referenceNo: "",
         fileName: file.name,
         status: "error",
-        error: "Processing failed. Please try again.",
+        error: actionableError,
       });
     }
   }
@@ -210,6 +364,65 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ results });
+}
+
+async function expandIncomingFiles(files: File[]): Promise<UploadInputFile[]> {
+  const expanded: UploadInputFile[] = [];
+
+  for (const file of files) {
+    if (isZipMime(file.type) || file.name.toLowerCase().endsWith(".zip")) {
+      const zipBuffer = Buffer.from(await file.arrayBuffer());
+      const zip = await JSZip.loadAsync(zipBuffer);
+      const zipEntries = Object.values(zip.files).filter((entry) => !entry.dir);
+
+      if (zipEntries.length === 0) {
+        throw new Error(`ZIP "${file.name}" is empty.`);
+      }
+      if (zipEntries.length > MAX_ZIP_ENTRIES) {
+        throw new Error(
+          `ZIP "${file.name}" has ${zipEntries.length} files. Maximum allowed per ZIP is ${MAX_ZIP_ENTRIES}.`
+        );
+      }
+
+      for (const entry of zipEntries) {
+        const entryName = entry.name.split("/").pop() || entry.name;
+        const entryLower = entryName.toLowerCase();
+        const inferredMime = inferMimeFromName(entryLower);
+        if (!inferredMime || !isValidMime(inferredMime)) {
+          continue;
+        }
+        const entryBuffer = await entry.async("nodebuffer");
+        expanded.push({
+          name: entryName,
+          type: inferredMime,
+          size: entryBuffer.length,
+          buffer: entryBuffer,
+        });
+      }
+      continue;
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    expanded.push({
+      name: file.name,
+      type: file.type || inferMimeFromName(file.name.toLowerCase()) || "application/octet-stream",
+      size: file.size,
+      buffer,
+    });
+  }
+
+  return expanded;
+}
+
+function inferMimeFromName(name: string): string | null {
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".jpeg") || name.endsWith(".jpg")) return "image/jpeg";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".heic") || name.endsWith(".heif")) return "image/heic";
+  if (name.endsWith(".tiff") || name.endsWith(".tif")) return "image/tiff";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".xml")) return "application/xml";
+  return null;
 }
 
 /** Background: extract invoice data using Claude, then update DB */

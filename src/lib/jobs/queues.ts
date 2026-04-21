@@ -46,7 +46,7 @@ export interface RpaJobData {
 export const invoiceQueue = new Queue<InvoiceJobData>("invoice-processing", {
   connection: getConnection(),
   defaultJobOptions: {
-    attempts: 3,
+    attempts: 5,
     backoff: { type: "exponential", delay: 2000 },
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 200 },

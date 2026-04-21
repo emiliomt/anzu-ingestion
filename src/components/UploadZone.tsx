@@ -11,6 +11,27 @@ interface UploadFile {
   error?: string;
 }
 
+function extractUploadErrorMessage(payload: unknown): string {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "results" in payload &&
+    Array.isArray((payload as { results?: unknown[] }).results)
+  ) {
+    const firstError = (payload as { results: Array<{ status?: string; error?: string }> }).results.find(
+      (r) => r.status === "error" && typeof r.error === "string" && r.error.trim().length > 0
+    );
+    if (firstError?.error) return firstError.error;
+  }
+
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const value = (payload as { error?: unknown }).error;
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+
+  return "Upload failed";
+}
+
 interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
@@ -19,9 +40,39 @@ interface UploadZoneProps {
   organizationId?: string;
 }
 
-const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.heic,.tiff,.webp";
+const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 20 * 1024 * 1024;
-const MAX_FILES = 10;
+const MAX_FILES = 250;
+const UPLOAD_BATCH_SIZE = 10;
+const UPLOAD_MAX_CONCURRENCY = 1;
+
+type UploadApiResult = {
+  referenceNo: string;
+  fileName: string;
+  status: string;
+  error?: string;
+};
+
+type UploadApiResponse = {
+  results?: UploadApiResult[];
+  error?: string;
+};
+
+async function parseUploadResponse(res: Response): Promise<UploadApiResponse> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { error: `Empty server response (${res.status})` };
+  }
+
+  try {
+    return JSON.parse(text) as UploadApiResponse;
+  } catch {
+    const preview = text.slice(0, 120).replace(/\s+/g, " ").trim();
+    return {
+      error: `Server returned non-JSON response (${res.status}): ${preview || "no response body"}`,
+    };
+  }
+}
 
 export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -65,58 +116,118 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
     if (validFiles.length === 0) return;
 
     setIsUploading(true);
+    const ids = new Set(validFiles.map((f) => f.id));
+    setFiles((prev) =>
+      prev.map((f) =>
+        ids.has(f.id)
+          ? { ...f, status: "uploading", error: undefined }
+          : f
+      )
+    );
 
-    const formData = new FormData();
-    if (email) formData.append("email", email);
-    if (name) formData.append("name", name);
-    if (organizationId) formData.append("organizationId", organizationId);
-    validFiles.forEach((f) => formData.append("files", f.file));
+    const refs: string[] = [];
 
-    try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        throw new Error(err.error ?? "Upload failed");
+    async function uploadBatch(batch: UploadFile[]) {
+      const batchByName = new Map<string, UploadFile[]>();
+      for (const fileItem of batch) {
+        const arr = batchByName.get(fileItem.file.name) ?? [];
+        arr.push(fileItem);
+        batchByName.set(fileItem.file.name, arr);
       }
 
-      const data = await res.json() as {
-        results: Array<{ referenceNo: string; fileName: string; status: string; error?: string }>;
-      };
+      const formData = new FormData();
+      if (email) formData.append("email", email);
+      if (name) formData.append("name", name);
+      if (organizationId) formData.append("organizationId", organizationId);
+      batch.forEach((f) => formData.append("files", f.file));
 
-      const refs: string[] = [];
-      setFiles((prev) =>
-        prev.map((f) => {
-          const result = data.results.find((r) => r.fileName === f.file.name);
-          if (result) {
-            if (result.status === "received") refs.push(result.referenceNo);
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const raw = await parseUploadResponse(res);
+        const data = raw as { results: UploadApiResult[] };
+
+        if (!res.ok || !Array.isArray(data.results)) {
+          throw new Error(extractUploadErrorMessage(raw));
+        }
+
+        const resultById = new Map<string, {
+          status: "success" | "error";
+          referenceNo?: string;
+          error?: string;
+        }>();
+
+        for (const r of data.results) {
+          const matches = batchByName.get(r.fileName);
+          const target = matches?.shift();
+          if (!target) continue;
+
+          if (r.status === "received") {
+            refs.push(r.referenceNo);
+            resultById.set(target.id, {
+              status: "success",
+              referenceNo: r.referenceNo,
+            });
+          } else {
+            resultById.set(target.id, {
+              status: "error",
+              error: r.error ?? "Upload failed",
+            });
+          }
+        }
+
+        setFiles((prev) =>
+          prev.map((f) => {
+            const mapped = resultById.get(f.id);
+            if (!mapped) return f;
             return {
               ...f,
-              status: result.status === "received" ? "success" : "error",
-              referenceNo: result.referenceNo,
-              error: result.error,
+              status: mapped.status,
+              referenceNo: mapped.referenceNo,
+              error: mapped.error,
             };
-          }
-          return f;
-        })
-      );
+          })
+        );
+      } catch (err) {
+        console.error(err);
 
-      setSuccessRefs(refs);
-      setSubmitted(true);
-      onUploadComplete?.(refs);
-    } catch (err) {
-      console.error(err);
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.status === "pending" ? { ...f, status: "error", error: "Upload failed" } : f
-        )
-      );
-    } finally {
-      setIsUploading(false);
+        // Automatically split failed batches to reduce payload/timeout failures.
+        if (batch.length > 1) {
+          const midpoint = Math.ceil(batch.length / 2);
+          await uploadBatch(batch.slice(0, midpoint));
+          await uploadBatch(batch.slice(midpoint));
+          return;
+        }
+
+        const fallbackMessage = err instanceof Error && err.message
+          ? err.message
+          : "Upload failed";
+        const failedIds = new Set(batch.map((f) => f.id));
+        setFiles((prev) =>
+          prev.map((f) =>
+            failedIds.has(f.id)
+              ? { ...f, status: "error", error: fallbackMessage }
+              : f
+          )
+        );
+      }
     }
+
+    for (let i = 0; i < validFiles.length; i += UPLOAD_BATCH_SIZE * UPLOAD_MAX_CONCURRENCY) {
+      const group = validFiles.slice(i, i + UPLOAD_BATCH_SIZE * UPLOAD_MAX_CONCURRENCY);
+      for (let j = 0; j < group.length; j += UPLOAD_BATCH_SIZE) {
+        const batch = group.slice(j, j + UPLOAD_BATCH_SIZE);
+        await uploadBatch(batch);
+      }
+    }
+
+    setSuccessRefs(refs);
+    setSubmitted(true);
+    onUploadComplete?.(refs);
+    setIsUploading(false);
   };
 
   if (submitted && successRefs.length > 0) {
@@ -193,7 +304,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB · Up to 10 files
+          PDF, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB per file · Up to 250 files
         </p>
       </div>
 

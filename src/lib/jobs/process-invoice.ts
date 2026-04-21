@@ -43,6 +43,14 @@ const EXTENDED_FIELDS = [
 
 const SCALAR_FIELDS = [...CORE_FIELDS, ...EXTENDED_FIELDS] as const;
 
+export interface ProcessInvoicePipelineOptions {
+  /**
+   * Re-throw after persisting extraction_failed so BullMQ marks the attempt as failed.
+   * Keep false for fire-and-forget callers that should not crash their parent flow.
+   */
+  rethrowOnError?: boolean;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -61,7 +69,8 @@ export async function processInvoicePipeline(
   buffer: Buffer,
   mimeType: string,
   submittedBy: string | null,
-  organizationId?: string | null
+  organizationId?: string | null,
+  opts: ProcessInvoicePipelineOptions = {}
 ): Promise<void> {
   await prisma.ingestionEvent.create({
     data: { invoiceId, eventType: "processing_started" },
@@ -314,5 +323,8 @@ export async function processInvoicePipeline(
         metadata: JSON.stringify({ error: String(err) }),
       },
     });
+    if (opts.rethrowOnError) {
+      throw err;
+    }
   }
 }

@@ -69,6 +69,21 @@ const EXTRACT_MODEL   = "gpt-4.1-mini-2025-04-14";  // text-only — cheap struc
 const OCR_MAX_OUTPUT_TOKENS = 16_384;
 const EXTRACTION_INPUT_CHAR_LIMIT = 48_000;
 const EXTRACT_MAX_OUTPUT_TOKENS = 16_384;
+const OPENAI_RETRY_ATTEMPTS = 4;
+const OPENAI_RETRY_BASE_DELAY_MS = 1200;
+
+function parseJsonWithObjectFallback(input: string): unknown {
+  try {
+    return JSON.parse(input);
+  } catch {
+    const start = input.indexOf("{");
+    const end = input.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(input.slice(start, end + 1));
+    }
+    throw new Error("Extraction returned invalid JSON");
+  }
+}
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -271,6 +286,58 @@ async function handleImageOrPdf(
   mimeType: string,
   opts: ExtractionOptions = {}
 ): Promise<{ result: InvoiceExtraction; ocrText: string }> {
+  const ocrClient = mimeType === "application/pdf"
+    ? getClient({ requireFilesApi: true })
+    : getClient();
+  const extractClient = mimeType === "application/pdf" ? ocrClient : getClient();
+
+  async function withOpenAiRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    let attempt = 0;
+    let lastErr: unknown;
+    while (attempt < OPENAI_RETRY_ATTEMPTS) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const status = typeof (err as { status?: unknown })?.status === "number"
+          ? (err as { status: number }).status
+          : null;
+        const message = err instanceof Error ? err.message : String(err ?? "");
+        const lower = message.toLowerCase();
+        const retryable =
+          status === 429 ||
+          status === 408 ||
+          (status != null && status >= 500) ||
+          lower.includes("rate limit") ||
+          lower.includes("timeout") ||
+          lower.includes("network") ||
+          lower.includes("socket hang up") ||
+          lower.includes("econnreset") ||
+          lower.includes("bad gateway") ||
+          lower.includes("gateway timeout") ||
+          lower.includes("service unavailable") ||
+          lower.includes("invalid json") ||
+          lower.includes("finish_reason=length") ||
+          lower.includes("temporarily unavailable") ||
+          lower.includes("overloaded");
+
+        attempt += 1;
+        if (!retryable || attempt >= OPENAI_RETRY_ATTEMPTS) {
+          break;
+        }
+
+        const jitter = Math.floor(Math.random() * 400);
+        const delayMs = OPENAI_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + jitter;
+        console.warn(
+          `[openai] ${label} failed (attempt ${attempt}/${OPENAI_RETRY_ATTEMPTS}) with status=${status ?? "n/a"}; retrying in ${delayMs}ms`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error(`[openai] ${label} failed after retries`);
+  }
   // ── Step A: Build content parts for the OCR pass ──────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ocrParts: any[] = [];
@@ -278,12 +345,14 @@ async function handleImageOrPdf(
 
   if (mimeType === "application/pdf") {
     try {
-      const uploaded = await getClient({ requireFilesApi: true }).files.create({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        purpose: "user_data" as any,
-      });
+      const uploaded = await withOpenAiRetry("pdf-files-create", () =>
+        ocrClient.files.create({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          file: new File([new Uint8Array(buffer)], "invoice.pdf", { type: "application/pdf" }) as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          purpose: "user_data" as any,
+        })
+      );
       uploadedFileId = uploaded.id;
       ocrParts.push({ type: "file", file: { file_id: uploadedFileId } });
     } catch (err) {
@@ -330,20 +399,22 @@ async function handleImageOrPdf(
   // ── Step B: Call GPT-4o for OCR ───────────────────────────────────────
   let rawOcrText = "";
   try {
-    const ocrResp = await getClient().chat.completions.create({
-      model: OCR_MODEL,
-      max_tokens: OCR_MAX_OUTPUT_TOKENS,
-      temperature: 0,
-      messages: [
-        { role: "system", content: OCR_SYSTEM_PROMPT },
-        { role: "user", content: ocrParts },
-      ],
-    });
+    const ocrResp = await withOpenAiRetry("ocr-chat-completion", () =>
+      ocrClient.chat.completions.create({
+        model: OCR_MODEL,
+        max_tokens: OCR_MAX_OUTPUT_TOKENS,
+        temperature: 0,
+        messages: [
+          { role: "system", content: OCR_SYSTEM_PROMPT },
+          { role: "user", content: ocrParts },
+        ],
+      })
+    );
     rawOcrText = ocrResp.choices[0]?.message?.content ?? "";
   } finally {
     // Clean up uploaded PDF file regardless of OCR success/failure
     if (uploadedFileId) {
-      getClient({ requireFilesApi: true }).files.delete(uploadedFileId).catch(() => {});
+      ocrClient.files.delete(uploadedFileId).catch(() => {});
     }
   }
 
@@ -371,39 +442,39 @@ async function handleImageOrPdf(
   const extractModel = opts.fineTunedModelId ?? EXTRACT_MODEL;
   const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
-  const extractResp = await Promise.race([
-    getClient().chat.completions.create({
-      model: extractModel,
-      max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt + truncatedText },
-      ],
-    }),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-    ),
-  ]);
+  const { rawParsed } = await withOpenAiRetry("structured-extraction", async () => {
+    const extractResp = await Promise.race([
+      extractClient.chat.completions.create({
+        model: extractModel,
+        max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt + truncatedText },
+        ],
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+      ),
+    ]);
 
-  const raw = extractResp.choices[0]?.message?.content ?? "";
-  const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
+    const raw = extractResp.choices[0]?.message?.content ?? "";
+    const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
+    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
-  const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
-  let rawParsed: unknown;
-  try {
-    rawParsed = JSON.parse(cleaned);
-  } catch {
-    const hint =
-      extractFinishReason === "length"
-        ? " (model output was truncated — finish_reason=length)"
-        : "";
-    throw new Error(
-      `Extraction returned invalid JSON${hint}. Raw response (prefix): ${raw.slice(0, 1200)}`
-    );
-  }
+    try {
+      return { rawParsed: parseJsonWithObjectFallback(cleaned) };
+    } catch {
+      const hint =
+        extractFinishReason === "length"
+          ? " (model output was truncated — finish_reason=length)"
+          : "";
+      throw new Error(
+        `Extraction returned invalid JSON${hint}. Raw response (prefix): ${raw.slice(0, 1200)}`
+      );
+    }
+  });
 
   const validation = InvoiceExtractionSchema.safeParse(rawParsed);
   let parsed: InvoiceExtraction;

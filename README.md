@@ -23,6 +23,9 @@ Required:
 Recommended for full OpenAI capabilities:
 - `OPENAI_FULL_ACCESS_API_KEY` — use a key with Files API scopes (e.g. `api.files.write`) for PDF uploads and fine-tuning.
 
+Optional fine-tune override:
+- `OPENAI_FINETUNE_MODEL_ID` — force a specific fine-tuned extraction model ID (e.g. `ft:...`) when `finetune_model_id` is not yet saved in settings.
+
 Optional (for email and WhatsApp):
 - `SMTP_*` — for sending confirmation emails (use Mailtrap for dev)
 - `TWILIO_*` — for WhatsApp ingestion

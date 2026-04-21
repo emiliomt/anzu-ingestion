@@ -92,6 +92,11 @@ export async function POST(request: NextRequest) {
   // Store the file
   const stored = await storeFile(buffer, file.name, mimeType, "po");
 
+  const baseClient = mimeType === "application/pdf"
+    ? getOpenAIClient({ requireFilesApi: true })
+    : getOpenAIClient();
+  const filesClient = baseClient;
+
   // Build GPT-4o message — PDFs uploaded via Files API, images as base64
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const userContent: any[] = [];
@@ -99,7 +104,7 @@ export async function POST(request: NextRequest) {
 
   if (mimeType === "application/pdf") {
     try {
-      const uploaded = await getOpenAIClient({ requireFilesApi: true }).files.create({
+      const uploaded = await filesClient.files.create({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         file: new File([new Uint8Array(buffer)], file.name, { type: "application/pdf" }) as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,7 +140,7 @@ export async function POST(request: NextRequest) {
 
   let raw = "";
   try {
-    const response = await getOpenAIClient().chat.completions.create({
+    const response = await baseClient.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1024,
       temperature: 0,
@@ -151,7 +156,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `AI extraction failed: ${msg}` }, { status: 502 });
   } finally {
     if (uploadedFileId) {
-      getOpenAIClient({ requireFilesApi: true }).files.delete(uploadedFileId).catch(() => {});
+      filesClient.files.delete(uploadedFileId).catch(() => {});
     }
   }
 
