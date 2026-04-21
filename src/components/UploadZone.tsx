@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ChevronDown } from "lucide-react";
 
 interface UploadFile {
   file: File;
@@ -89,6 +89,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
   const [orgs, setOrgs] = useState<PublicOrganization[]>([]);
   const [orgSearch, setOrgSearch] = useState("");
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
+  const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [orgsError, setOrgsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -119,6 +120,11 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
     if (!term) return orgs;
     return orgs.filter((org) => org.name.toLowerCase().includes(term));
   }, [orgSearch, orgs]);
+
+  const selectedOrg = useMemo(
+    () => orgs.find((org) => org.id === selectedOrgId) ?? null,
+    [orgs, selectedOrgId]
+  );
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles);
@@ -318,14 +324,64 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
         <p className="text-xs text-gray-500">
           Choose the company that should receive and process these invoices.
         </p>
-        <input
-          type="text"
-          placeholder="Search company..."
-          value={orgSearch}
-          onChange={(e) => setOrgSearch(e.target.value)}
-          className="input"
-          disabled={loadingOrgs}
-        />
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOrgDropdownOpen((v) => !v)}
+            disabled={loadingOrgs}
+            className="input w-full flex items-center justify-between disabled:opacity-60"
+          >
+            <span className={`truncate ${selectedOrg ? "text-gray-800" : "text-gray-400"}`}>
+              {selectedOrg ? selectedOrg.name : "Select a client company"}
+            </span>
+            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${orgDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+          {orgDropdownOpen && !loadingOrgs && !orgsError && (
+            <div className="absolute z-20 mt-2 w-full rounded-lg border border-gray-200 bg-white shadow-lg p-2 space-y-2">
+              <input
+                type="text"
+                placeholder="Search company..."
+                value={orgSearch}
+                onChange={(e) => setOrgSearch(e.target.value)}
+                className="input"
+              />
+              <div className="max-h-52 overflow-auto space-y-1">
+                {filteredOrgs.length === 0 ? (
+                  <div className="text-xs text-gray-400 px-2 py-1">No companies found.</div>
+                ) : (
+                  filteredOrgs.map((org) => {
+                    const selected = selectedOrgId === org.id;
+                    return (
+                      <button
+                        key={org.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOrgId(org.id);
+                          setOrgDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? "border-indigo-300 bg-indigo-50"
+                            : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        {org.logo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={org.logo} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-6 h-6 rounded bg-gray-100 text-gray-500 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
+                            {org.name.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-xs font-medium text-gray-700 truncate">{org.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         {loadingOrgs ? (
           <div className="text-xs text-gray-400 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -333,37 +389,9 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
           </div>
         ) : orgsError ? (
           <div className="text-xs text-red-500">{orgsError}</div>
-        ) : filteredOrgs.length === 0 ? (
-          <div className="text-xs text-gray-400">No companies found.</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-auto pr-1">
-            {filteredOrgs.map((org) => {
-              const selected = selectedOrgId === org.id;
-              return (
-                <button
-                  key={org.id}
-                  type="button"
-                  onClick={() => setSelectedOrgId(org.id)}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
-                    selected
-                      ? "border-indigo-300 bg-indigo-50"
-                      : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50"
-                  }`}
-                >
-                  {org.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={org.logo} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-6 h-6 rounded bg-gray-100 text-gray-500 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
-                      {org.name.slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <span className="text-xs font-medium text-gray-700 truncate">{org.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        ) : orgs.length === 0 ? (
+          <div className="text-xs text-gray-400">No client companies are available yet.</div>
+        ) : null}
       </div>
 
       {/* Drop zone */}
