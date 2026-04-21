@@ -362,8 +362,12 @@ export default function SettingsPage() {
     fetch("/api/organizations/vendor-portal")
       .then((r) => r.json())
       .then((data) => {
+        const payload = data as {
+          vendorPortalEnabled?: boolean;
+          enabled?: boolean;
+        };
         setVendorPortal({
-          enabled: Boolean((data as { enabled?: boolean }).enabled),
+          enabled: Boolean(payload.vendorPortalEnabled ?? payload.enabled),
         });
       })
       .catch(() => {});

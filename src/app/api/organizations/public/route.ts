@@ -3,7 +3,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 
 export const dynamic = "force-dynamic";
 
-const MAX_ORGS = 200;
+const MAX_ORGS = 500;
 
 type OrganizationSummary = {
   id: string;
@@ -30,7 +30,10 @@ function extractOrganizations(payload: unknown): OrganizationSummary[] {
 export async function GET() {
   try {
     const client = await clerkClient();
-    const orgsPayload = await client.organizations.getOrganizationList({ limit: MAX_ORGS });
+    const orgsPayload = await client.organizations.getOrganizationList({
+      limit: MAX_ORGS,
+      orderBy: "name",
+    });
     const organizations = extractOrganizations(orgsPayload)
       .filter((org) => isVendorPortalEnabled(org.publicMetadata))
       .map((org) => ({

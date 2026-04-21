@@ -14,8 +14,11 @@ export async function GET() {
     const client = await clerkClient();
     const org = await client.organizations.getOrganization({ organizationId: orgId });
     const metadata = (org.publicMetadata ?? {}) as VendorPortalMetadata;
+    const enabled = metadata.vendor_portal_enabled === true;
     return NextResponse.json({
-      vendorPortalEnabled: metadata.vendor_portal_enabled === true,
+      // Keep both keys for compatibility with existing clients.
+      enabled,
+      vendorPortalEnabled: enabled,
     });
   } catch (err) {
     if (err instanceof RoleError) {
