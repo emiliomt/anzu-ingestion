@@ -33,6 +33,7 @@ const isPublic = createRouteMatcher([
   // Other public API endpoints
   "/api/status(.*)",
   "/api/upload",   // unauthenticated vendor upload (email/name in form)
+  "/api/organizations/public",
   "/api/health",
 ]);
 

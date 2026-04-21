@@ -5,13 +5,17 @@ import {
   Cpu, Webhook, FileType, Info,
   Copy, Check, Zap, FileText, Image,
   Settings2, Save, Loader2, SlidersHorizontal,
-  Plus, Trash2, ToggleLeft, ToggleRight, FileOutput,
+  Plus, Trash2, ToggleLeft, ToggleRight, FileOutput, Globe,
 } from "lucide-react";
 import {
   ErpExportSettingsSection,
 } from "@/components/ErpExportSettingsSection";
 import { COUNTRY_CURRENCY, ALL_EXTRACTION_FIELDS } from "@/lib/app-settings";
 import type { AppSettings } from "@/lib/app-settings";
+
+interface VendorPortalSetting {
+  enabled: boolean;
+}
 
 // ── Copy-to-clipboard helper ──────────────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -269,6 +273,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [vendorPortal, setVendorPortal] = useState<VendorPortalSetting>({ enabled: false });
+  const [vendorPortalSaving, setVendorPortalSaving] = useState(false);
 
   // ── Custom fields state ─────────────────────────────────────────────────────
   const [customFields, setCustomFields] = useState<CustomFieldRecord[]>([]);
@@ -352,6 +358,17 @@ export default function SettingsPage() {
       });
   }, []);
 
+  useEffect(() => {
+    fetch("/api/organizations/vendor-portal")
+      .then((r) => r.json())
+      .then((data) => {
+        setVendorPortal({
+          enabled: Boolean((data as { enabled?: boolean }).enabled),
+        });
+      })
+      .catch(() => {});
+  }, []);
+
   // When country changes, auto-update currency
   const setDraftField = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setDraft((prev) => {
@@ -388,6 +405,26 @@ export default function SettingsPage() {
       setError("Failed to save settings. Please try again.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleVendorPortalToggle(enabled: boolean) {
+    setVendorPortalSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/organizations/vendor-portal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setVendorPortal({ enabled });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      setError("Failed to update vendor portal setting. Please try again.");
+    } finally {
+      setVendorPortalSaving(false);
     }
   }
 
@@ -922,6 +959,36 @@ export default function SettingsPage() {
             <Row label="Status Lookup"    value={`${origin}/status/{referenceNo}`} mono copyable />
             <Row label="Invoice API"      value={`${origin}/api/invoices`} mono copyable />
             <Row label="Export CSV"       value={`${origin}/api/export`}   mono copyable />
+          </Section>
+
+          {/* ── Vendor Portal Access ── */}
+          <Section
+            icon={<Globe className="w-4 h-4" />}
+            title="Vendor Portal Access"
+            description="Allow suppliers to select this organization in the public invoice upload portal"
+          >
+            <FieldRow
+              label="Accept vendor portal uploads"
+              hint="When enabled, your company appears in the public company picker used by vendors"
+            >
+              <button
+                type="button"
+                onClick={() => handleVendorPortalToggle(!vendorPortal.enabled)}
+                disabled={vendorPortalSaving}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  vendorPortal.enabled
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                    : "bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200"
+                } disabled:opacity-60`}
+              >
+                {vendorPortal.enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                {vendorPortalSaving
+                  ? "Saving..."
+                  : vendorPortal.enabled
+                    ? "Enabled"
+                    : "Disabled"}
+              </button>
+            </FieldRow>
           </Section>
 
           {/* ── Accepted File Types ── */}

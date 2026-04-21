@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 
 interface UploadFile {
@@ -36,8 +36,12 @@ interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
   prefilledEmail?: string;
-  /** Org ID embedded in the portal URL — tags vendor uploads to the correct tenant */
-  organizationId?: string;
+}
+
+interface PublicOrganization {
+  id: string;
+  name: string;
+  logo: string | null;
 }
 
 const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
@@ -74,7 +78,7 @@ async function parseUploadResponse(res: Response): Promise<UploadApiResponse> {
   }
 }
 
-export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [email, setEmail] = useState(prefilledEmail);
@@ -82,7 +86,39 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
   const [isUploading, setIsUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successRefs, setSuccessRefs] = useState<string[]>([]);
+  const [orgs, setOrgs] = useState<PublicOrganization[]>([]);
+  const [orgSearch, setOrgSearch] = useState("");
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
+  const [loadingOrgs, setLoadingOrgs] = useState(true);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    async function loadOrganizations() {
+      setLoadingOrgs(true);
+      setOrgsError(null);
+      try {
+        const res = await fetch("/api/organizations/public", { cache: "no-store" });
+        const data = await res.json() as { organizations?: PublicOrganization[]; error?: string };
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to load companies");
+        }
+        setOrgs(data.organizations ?? []);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load companies";
+        setOrgsError(message);
+      } finally {
+        setLoadingOrgs(false);
+      }
+    }
+    loadOrganizations();
+  }, []);
+
+  const filteredOrgs = useMemo(() => {
+    const term = orgSearch.trim().toLowerCase();
+    if (!term) return orgs;
+    return orgs.filter((org) => org.name.toLowerCase().includes(term));
+  }, [orgSearch, orgs]);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles);
@@ -138,7 +174,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       const formData = new FormData();
       if (email) formData.append("email", email);
       if (name) formData.append("name", name);
-      if (organizationId) formData.append("organizationId", organizationId);
+      if (selectedOrgId) formData.append("organizationId", selectedOrgId);
       batch.forEach((f) => formData.append("files", f.file));
 
       try {
@@ -264,6 +300,8 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
             setSuccessRefs([]);
             setEmail("");
             setName("");
+            setSelectedOrgId("");
+            setOrgSearch("");
           }}
         >
           Submit another invoice
@@ -274,6 +312,60 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
 
   return (
     <div className="space-y-4">
+      {/* Step 1: Company selector */}
+      <div className="card p-4 space-y-3">
+        <p className="text-sm font-semibold text-gray-800">Step 1: Select receiving company</p>
+        <p className="text-xs text-gray-500">
+          Choose the company that should receive and process these invoices.
+        </p>
+        <input
+          type="text"
+          placeholder="Search company..."
+          value={orgSearch}
+          onChange={(e) => setOrgSearch(e.target.value)}
+          className="input"
+          disabled={loadingOrgs}
+        />
+        {loadingOrgs ? (
+          <div className="text-xs text-gray-400 flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Loading companies...
+          </div>
+        ) : orgsError ? (
+          <div className="text-xs text-red-500">{orgsError}</div>
+        ) : filteredOrgs.length === 0 ? (
+          <div className="text-xs text-gray-400">No companies found.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-auto pr-1">
+            {filteredOrgs.map((org) => {
+              const selected = selectedOrgId === org.id;
+              return (
+                <button
+                  key={org.id}
+                  type="button"
+                  onClick={() => setSelectedOrgId(org.id)}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                    selected
+                      ? "border-indigo-300 bg-indigo-50"
+                      : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50"
+                  }`}
+                >
+                  {org.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={org.logo} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-6 h-6 rounded bg-gray-100 text-gray-500 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
+                      {org.name.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-xs font-medium text-gray-700 truncate">{org.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Drop zone */}
       <div
         onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -371,7 +463,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       {files.some((f) => f.status === "pending" && !f.error) && (
         <button
           onClick={handleUpload}
-          disabled={isUploading}
+          disabled={isUploading || !selectedOrgId}
           className="btn-primary w-full justify-center py-3"
         >
           {isUploading ? (
