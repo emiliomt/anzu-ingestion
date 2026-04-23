@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
-import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ChevronDown } from "lucide-react";
 
 interface UploadFile {
   file: File;
@@ -36,8 +36,12 @@ interface UploadZoneProps {
   onUploadComplete?: (references: string[]) => void;
   /** Pre-fill email when a signed-in provider submits */
   prefilledEmail?: string;
-  /** Org ID embedded in the portal URL — tags vendor uploads to the correct tenant */
-  organizationId?: string;
+}
+
+interface PublicOrganization {
+  id: string;
+  name: string;
+  logo: string | null;
 }
 
 const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
@@ -74,7 +78,7 @@ async function parseUploadResponse(res: Response): Promise<UploadApiResponse> {
   }
 }
 
-export function UploadZone({ onUploadComplete, prefilledEmail = "", organizationId }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [email, setEmail] = useState(prefilledEmail);
@@ -82,7 +86,51 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
   const [isUploading, setIsUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successRefs, setSuccessRefs] = useState<string[]>([]);
+  const [orgs, setOrgs] = useState<PublicOrganization[]>([]);
+  const [orgSearch, setOrgSearch] = useState("");
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
+  const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
+  const [loadingOrgs, setLoadingOrgs] = useState(true);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
+  const [orgsFilterMode, setOrgsFilterMode] = useState<"strict" | "fallback">("strict");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    async function loadOrganizations() {
+      setLoadingOrgs(true);
+      setOrgsError(null);
+      try {
+        const res = await fetch("/api/organizations/public", { cache: "no-store" });
+        const data = await res.json() as {
+          organizations?: PublicOrganization[];
+          error?: string;
+          filterMode?: "strict" | "fallback";
+        };
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to load companies");
+        }
+        setOrgs(data.organizations ?? []);
+        setOrgsFilterMode(data.filterMode === "fallback" ? "fallback" : "strict");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load companies";
+        setOrgsError(message);
+      } finally {
+        setLoadingOrgs(false);
+      }
+    }
+    loadOrganizations();
+  }, []);
+
+  const filteredOrgs = useMemo(() => {
+    const term = orgSearch.trim().toLowerCase();
+    if (!term) return orgs;
+    return orgs.filter((org) => org.name.toLowerCase().includes(term));
+  }, [orgSearch, orgs]);
+
+  const selectedOrg = useMemo(
+    () => orgs.find((org) => org.id === selectedOrgId) ?? null,
+    [orgs, selectedOrgId]
+  );
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles);
@@ -138,7 +186,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       const formData = new FormData();
       if (email) formData.append("email", email);
       if (name) formData.append("name", name);
-      if (organizationId) formData.append("organizationId", organizationId);
+      if (selectedOrgId) formData.append("organizationId", selectedOrgId);
       batch.forEach((f) => formData.append("files", f.file));
 
       try {
@@ -231,30 +279,45 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
   };
 
   if (submitted && successRefs.length > 0) {
+    const hasManyRefs = successRefs.length > 1;
+    const firstRef = successRefs[0];
     return (
       <div className="card p-8 text-center space-y-4">
         <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto">
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
-        <h3 className="text-xl font-semibold text-gray-900">Invoice Received!</h3>
+        <h3 className="text-xl font-semibold text-gray-900">
+          {hasManyRefs ? "Invoices Received!" : "Invoice Received!"}
+        </h3>
         <p className="text-gray-500">
-          Your invoice has been received and is being processed.
+          {hasManyRefs
+            ? `${successRefs.length} invoices have been received and are being processed.`
+            : "Your invoice has been received and is being processed."}
           {email && " A confirmation email is on its way."}
         </p>
         <div className="bg-indigo-50 rounded-lg p-4">
-          {successRefs.map((ref) => (
-            <div key={ref} className="mb-2 last:mb-0">
-              <p className="text-xs text-indigo-500 uppercase tracking-wider">Reference Number</p>
-              <p className="text-2xl font-bold text-indigo-700 tracking-wider">{ref}</p>
+          <p className="text-xs text-indigo-500 uppercase tracking-wider mb-2">
+            {hasManyRefs ? "Reference Numbers" : "Reference Number"}
+          </p>
+          {hasManyRefs ? (
+            <div className="max-h-44 overflow-auto text-left space-y-1.5 pr-1">
+              {successRefs.map((ref) => (
+                <p key={ref} className="text-base font-semibold text-indigo-700 tracking-wide">
+                  {ref}
+                </p>
+              ))}
             </div>
-          ))}
+          ) : (
+            <p className="text-2xl font-bold text-indigo-700 tracking-wider">{firstRef}</p>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          {successRefs.map((ref) => (
-            <a key={ref} href={`/status/${ref}`} className="btn-secondary text-sm justify-center">
-              Track Status →
-            </a>
-          ))}
+          <a
+            href={hasManyRefs ? "/portal/dashboard" : `/status/${firstRef}`}
+            className="btn-secondary text-sm justify-center"
+          >
+            {hasManyRefs ? "View all invoices →" : "Track Status →"}
+          </a>
         </div>
         <button
           className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
@@ -264,6 +327,8 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
             setSuccessRefs([]);
             setEmail("");
             setName("");
+            setSelectedOrgId("");
+            setOrgSearch("");
           }}
         >
           Submit another invoice
@@ -274,6 +339,86 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
 
   return (
     <div className="space-y-4">
+      {/* Step 1: Company selector */}
+      <div className="card p-4 space-y-3">
+        <p className="text-sm font-semibold text-gray-800">Step 1: Select receiving company</p>
+        <p className="text-xs text-gray-500">
+          Choose the company that should receive and process these invoices.
+        </p>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOrgDropdownOpen((v) => !v)}
+            disabled={loadingOrgs}
+            className="input w-full flex items-center justify-between disabled:opacity-60"
+          >
+            <span className={`truncate ${selectedOrg ? "text-gray-800" : "text-gray-400"}`}>
+              {selectedOrg ? selectedOrg.name : "Select a client company"}
+            </span>
+            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${orgDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+          {orgDropdownOpen && !loadingOrgs && !orgsError && (
+            <div className="absolute z-20 mt-2 w-full rounded-lg border border-gray-200 bg-white shadow-lg p-2 space-y-2">
+              <input
+                type="text"
+                placeholder="Search company..."
+                value={orgSearch}
+                onChange={(e) => setOrgSearch(e.target.value)}
+                className="input"
+              />
+              <div className="max-h-52 overflow-auto space-y-1">
+                {filteredOrgs.length === 0 ? (
+                  <div className="text-xs text-gray-400 px-2 py-1">No companies found.</div>
+                ) : (
+                  filteredOrgs.map((org) => {
+                    const selected = selectedOrgId === org.id;
+                    return (
+                      <button
+                        key={org.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOrgId(org.id);
+                          setOrgDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? "border-indigo-300 bg-indigo-50"
+                            : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        {org.logo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={org.logo} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-6 h-6 rounded bg-gray-100 text-gray-500 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
+                            {org.name.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-xs font-medium text-gray-700 truncate">{org.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        {loadingOrgs ? (
+          <div className="text-xs text-gray-400 flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Loading companies...
+          </div>
+        ) : orgsError ? (
+          <div className="text-xs text-red-500">{orgsError}</div>
+        ) : orgs.length === 0 ? (
+          <div className="text-xs text-gray-400">No client companies are available yet.</div>
+        ) : orgsFilterMode === "fallback" ? (
+          <div className="text-xs text-amber-600">
+            Showing all organizations because no company has portal opt-in enabled yet.
+          </div>
+        ) : null}
+      </div>
+
       {/* Drop zone */}
       <div
         onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -371,7 +516,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
       {files.some((f) => f.status === "pending" && !f.error) && (
         <button
           onClick={handleUpload}
-          disabled={isUploading}
+          disabled={isUploading || !selectedOrgId}
           className="btn-primary w-full justify-center py-3"
         >
           {isUploading ? (
