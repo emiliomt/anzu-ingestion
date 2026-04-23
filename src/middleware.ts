@@ -34,6 +34,7 @@ const isPublic = createRouteMatcher([
   "/api/status(.*)",
   "/api/upload",   // unauthenticated vendor upload (email/name in form)
   "/api/health",
+  "/api/v1/ingest",
 ]);
 
 // ── Routes that require BOTH auth AND an active Clerk organization ─────────────

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestMatch } from "@/lib/matcher";
+import { getSettings } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -12,7 +13,7 @@ export async function POST() {
       status: { in: ["extracted", "reviewed", "complete"] },
       invoiceMatches: { none: { isConfirmed: true } },
     },
-    select: { id: true, referenceNo: true },
+    select: { id: true, referenceNo: true, organizationId: true },
     take: 20, // process up to 20 at a time
   });
 
@@ -21,9 +22,15 @@ export async function POST() {
   for (const inv of invoices) {
     try {
       const result = await suggestMatch(inv.id);
+      const settings = await getSettings(inv.organizationId ?? null);
+      const autoConfirmThreshold = settings.auto_approve_threshold;
+      const shouldAutoConfirm =
+        autoConfirmThreshold !== null &&
+        result.matchType !== "unmatched" &&
+        result.confidence >= autoConfirmThreshold;
 
       if (result.matchType !== "unmatched") {
-        // Upsert unconfirmed suggestion
+        // Upsert suggestion. Auto-confirm when confidence meets configured threshold.
         const existing = await prisma.invoiceMatch.findFirst({
           where: { invoiceId: inv.id, isConfirmed: false },
         });
@@ -40,6 +47,9 @@ export async function POST() {
               reasoning: result.reasoning,
               matchedBy: "ai",
               matchedAt: new Date(),
+              isConfirmed: shouldAutoConfirm,
+              confirmedBy: shouldAutoConfirm ? "ai:auto-threshold" : null,
+              confirmedAt: shouldAutoConfirm ? new Date() : null,
             },
           });
         } else {
@@ -53,7 +63,9 @@ export async function POST() {
               confidence: result.confidence,
               reasoning: result.reasoning,
               matchedBy: "ai",
-              isConfirmed: false,
+              isConfirmed: shouldAutoConfirm,
+              confirmedBy: shouldAutoConfirm ? "ai:auto-threshold" : null,
+              confirmedAt: shouldAutoConfirm ? new Date() : null,
             },
           });
         }
