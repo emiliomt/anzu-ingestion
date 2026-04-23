@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestMatch } from "@/lib/matcher";
+import { getSettings } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +12,23 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await suggestMatch(invoiceId);
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { organizationId: true },
+    });
+    if (!invoice) {
+      return NextResponse.json({ error: "invoice not found" }, { status: 404 });
+    }
 
-    // Upsert suggestion (unconfirmed) in DB
+    const settings = await getSettings(invoice.organizationId ?? null);
+    const autoConfirmThreshold = settings.auto_approve_threshold;
+    const result = await suggestMatch(invoiceId);
+    const shouldAutoConfirm =
+      autoConfirmThreshold !== null &&
+      result.matchType !== "unmatched" &&
+      result.confidence >= autoConfirmThreshold;
+
+    // Upsert suggestion in DB. Auto-confirm when confidence meets configured threshold.
     const existing = await prisma.invoiceMatch.findFirst({
       where: { invoiceId, isConfirmed: false },
     });
@@ -30,7 +45,9 @@ export async function POST(request: NextRequest) {
           reasoning: result.reasoning,
           matchedBy: "ai",
           matchedAt: new Date(),
-          isConfirmed: false,
+          isConfirmed: shouldAutoConfirm,
+          confirmedBy: shouldAutoConfirm ? "ai:auto-threshold" : null,
+          confirmedAt: shouldAutoConfirm ? new Date() : null,
         },
       });
     } else if (result.matchType !== "unmatched") {
@@ -44,7 +61,9 @@ export async function POST(request: NextRequest) {
           confidence: result.confidence,
           reasoning: result.reasoning,
           matchedBy: "ai",
-          isConfirmed: false,
+          isConfirmed: shouldAutoConfirm,
+          confirmedBy: shouldAutoConfirm ? "ai:auto-threshold" : null,
+          confirmedAt: shouldAutoConfirm ? new Date() : null,
         },
       });
     }
