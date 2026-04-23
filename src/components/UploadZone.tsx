@@ -92,6 +92,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [orgsError, setOrgsError] = useState<string | null>(null);
+  const [orgsFilterMode, setOrgsFilterMode] = useState<"strict" | "fallback">("strict");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -100,11 +101,16 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
       setOrgsError(null);
       try {
         const res = await fetch("/api/organizations/public", { cache: "no-store" });
-        const data = await res.json() as { organizations?: PublicOrganization[]; error?: string };
+        const data = await res.json() as {
+          organizations?: PublicOrganization[];
+          error?: string;
+          filterMode?: "strict" | "fallback";
+        };
         if (!res.ok) {
           throw new Error(data.error ?? "Failed to load companies");
         }
         setOrgs(data.organizations ?? []);
+        setOrgsFilterMode(data.filterMode === "fallback" ? "fallback" : "strict");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load companies";
         setOrgsError(message);
@@ -391,6 +397,10 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
           <div className="text-xs text-red-500">{orgsError}</div>
         ) : orgs.length === 0 ? (
           <div className="text-xs text-gray-400">No client companies are available yet.</div>
+        ) : orgsFilterMode === "fallback" ? (
+          <div className="text-xs text-amber-600">
+            Showing all organizations because no company has portal opt-in enabled yet.
+          </div>
         ) : null}
       </div>
 

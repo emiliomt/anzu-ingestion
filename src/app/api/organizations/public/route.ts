@@ -34,8 +34,12 @@ export async function GET() {
       limit: MAX_ORGS,
       orderBy: "name",
     });
-    const organizations = extractOrganizations(orgsPayload)
-      .filter((org) => isVendorPortalEnabled(org.publicMetadata))
+    const allOrganizations = extractOrganizations(orgsPayload);
+    const optedIn = allOrganizations.filter((org) => isVendorPortalEnabled(org.publicMetadata));
+
+    // Backward-compatible fallback: if nobody has explicitly opted in yet,
+    // return all organizations so vendors can still select a recipient.
+    const organizations = (optedIn.length > 0 ? optedIn : allOrganizations)
       .map((org) => ({
         id: org.id,
         name: org.name,
@@ -43,7 +47,10 @@ export async function GET() {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    return NextResponse.json({ organizations });
+    return NextResponse.json({
+      organizations,
+      usingFallback: optedIn.length === 0,
+    });
   } catch (err) {
     console.error("[organizations/public GET]", err);
     return NextResponse.json(
