@@ -14,7 +14,7 @@
 import { PrismaClient } from "@prisma/client";
 
 // ── Replace this with the actual model ID from your fine-tune job ──────────
-const MODEL_ID = "ft:gpt-4o-mini-2024-07-18:anzu-dynamics:anzu-vat-classifier-v1:REPLACE_ME";
+const MODEL_ID = "ft:gpt-4.1-mini-2025-04-14:anzu-dynamics:anzu-vat-classifier-v1:REPLACE_ME";
 // ──────────────────────────────────────────────────────────────────────────
 
 const prisma = new PrismaClient();

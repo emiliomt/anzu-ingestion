@@ -249,7 +249,7 @@ function ModelCard({ model }: { model: ModelConfig }) {
         {" · "}
         Base model:{" "}
         <code className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-          gpt-4o-mini
+          gpt-4.1-mini
         </code>
       </div>
 

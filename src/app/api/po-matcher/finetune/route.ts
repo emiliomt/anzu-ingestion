@@ -189,7 +189,7 @@ MATCHING RULES:
 
     const job = await client.fineTuning.jobs.create({
       training_file: file.id,
-      model: "gpt-4o-mini-2024-07-18",
+      model: "gpt-4.1-mini-2025-04-14",
       suffix: "anzu-po-matcher-v1",
     });
 
