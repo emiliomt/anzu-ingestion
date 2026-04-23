@@ -279,30 +279,45 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
   };
 
   if (submitted && successRefs.length > 0) {
+    const hasManyRefs = successRefs.length > 1;
+    const firstRef = successRefs[0];
     return (
       <div className="card p-8 text-center space-y-4">
         <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto">
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
-        <h3 className="text-xl font-semibold text-gray-900">Invoice Received!</h3>
+        <h3 className="text-xl font-semibold text-gray-900">
+          {hasManyRefs ? "Invoices Received!" : "Invoice Received!"}
+        </h3>
         <p className="text-gray-500">
-          Your invoice has been received and is being processed.
+          {hasManyRefs
+            ? `${successRefs.length} invoices have been received and are being processed.`
+            : "Your invoice has been received and is being processed."}
           {email && " A confirmation email is on its way."}
         </p>
         <div className="bg-indigo-50 rounded-lg p-4">
-          {successRefs.map((ref) => (
-            <div key={ref} className="mb-2 last:mb-0">
-              <p className="text-xs text-indigo-500 uppercase tracking-wider">Reference Number</p>
-              <p className="text-2xl font-bold text-indigo-700 tracking-wider">{ref}</p>
+          <p className="text-xs text-indigo-500 uppercase tracking-wider mb-2">
+            {hasManyRefs ? "Reference Numbers" : "Reference Number"}
+          </p>
+          {hasManyRefs ? (
+            <div className="max-h-44 overflow-auto text-left space-y-1.5 pr-1">
+              {successRefs.map((ref) => (
+                <p key={ref} className="text-base font-semibold text-indigo-700 tracking-wide">
+                  {ref}
+                </p>
+              ))}
             </div>
-          ))}
+          ) : (
+            <p className="text-2xl font-bold text-indigo-700 tracking-wider">{firstRef}</p>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          {successRefs.map((ref) => (
-            <a key={ref} href={`/status/${ref}`} className="btn-secondary text-sm justify-center">
-              Track Status →
-            </a>
-          ))}
+          <a
+            href={hasManyRefs ? "/portal/dashboard" : `/status/${firstRef}`}
+            className="btn-secondary text-sm justify-center"
+          >
+            {hasManyRefs ? "View all invoices →" : "Track Status →"}
+          </a>
         </div>
         <button
           className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
