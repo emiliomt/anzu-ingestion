@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   BrainCircuit, Download, Play, RefreshCw,
   CheckCircle2, XCircle, Loader2, AlertCircle,
-  BookOpen, Cpu,
+  BookOpen, Cpu, Save,
 } from "lucide-react";
 
 interface Stats {
@@ -53,6 +53,8 @@ export default function TrainingPage() {
   const [startingJob, setStartingJob] = useState(false);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualModelId, setManualModelId] = useState("");
+  const [savingModel, setSavingModel] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -115,6 +117,31 @@ export default function TrainingPage() {
 
   const exportData = () => {
     window.open("/api/training/export", "_blank");
+  };
+
+  const saveManualModel = async () => {
+    const id = manualModelId.trim();
+    if (!id) return;
+    setSavingModel(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finetune_model_id: id }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Failed to save model ID");
+      } else {
+        setManualModelId("");
+        await fetchStats();
+      }
+    } catch {
+      setError("Network error saving model ID");
+    } finally {
+      setSavingModel(false);
+    }
   };
 
   const canFineTune = (stats?.invoicesWithCorrections ?? 0) >= MIN_EXAMPLES;
@@ -235,6 +262,29 @@ export default function TrainingPage() {
               <p className="text-green-600 mt-1">All new extractions automatically use this model.</p>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-gray-600">
+              {stats?.finetune.modelId ? "Override model ID" : "Set model ID manually"}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={manualModelId}
+                onChange={(e) => setManualModelId(e.target.value)}
+                placeholder="ft:gpt-4.1-mini-…"
+                className="flex-1 text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              <button
+                onClick={saveManualModel}
+                disabled={savingModel || !manualModelId.trim()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingModel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Save
+              </button>
+            </div>
+          </div>
 
           {jobStatus && (
             <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs space-y-1">
