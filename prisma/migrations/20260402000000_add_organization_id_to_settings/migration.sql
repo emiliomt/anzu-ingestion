@@ -1,22 +1,13 @@
--- SQLite requires recreating the table to change the primary key.
--- Steps: create new table → copy data → drop old → rename.
+-- Add organizationId to settings and switch to composite primary key.
 
--- CreateTable (new schema)
-CREATE TABLE "settings_new" (
-    "organizationId" TEXT NOT NULL DEFAULT 'default',
-    "key" TEXT NOT NULL,
-    "value" TEXT NOT NULL,
-    "updatedAt" DATETIME NOT NULL,
-    PRIMARY KEY ("organizationId", "key")
-);
+-- 1. Add the new column with a default so existing rows get 'default'
+ALTER TABLE "settings" ADD COLUMN "organizationId" TEXT NOT NULL DEFAULT 'default';
 
--- Copy existing rows, defaulting organizationId to 'default'
-INSERT INTO "settings_new" ("organizationId", "key", "value", "updatedAt")
-SELECT 'default', "key", "value", "updatedAt" FROM "settings";
+-- 2. Drop the old single-column primary key
+ALTER TABLE "settings" DROP CONSTRAINT "settings_pkey";
 
--- Drop old table and rename
-DROP TABLE "settings";
-ALTER TABLE "settings_new" RENAME TO "settings";
+-- 3. Add the new composite primary key
+ALTER TABLE "settings" ADD CONSTRAINT "settings_pkey" PRIMARY KEY ("organizationId", "key");
 
--- CreateIndex
+-- 4. Add index on organizationId for tenant lookups
 CREATE INDEX "settings_organizationId_idx" ON "settings"("organizationId");
