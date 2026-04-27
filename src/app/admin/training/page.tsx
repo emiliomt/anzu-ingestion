@@ -125,10 +125,10 @@ export default function TrainingPage() {
     setSavingModel(true);
     setError(null);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch("/api/training/set-model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ finetune_model_id: id }),
+        body: JSON.stringify({ modelId: id }),
       });
       if (!res.ok) {
         const data = await res.json();
