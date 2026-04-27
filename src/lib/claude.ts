@@ -442,39 +442,54 @@ async function handleImageOrPdf(
   const extractModel = opts.fineTunedModelId ?? EXTRACT_MODEL;
   const userPrompt = buildExtractionUserPrompt(opts.enabled_fields);
 
-  const { rawParsed } = await withOpenAiRetry("structured-extraction", async () => {
-    const extractResp = await Promise.race([
-      extractClient.chat.completions.create({
-        model: extractModel,
-        max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt + truncatedText },
-        ],
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-      ),
-    ]);
+  const runExtraction = (model: string) =>
+    withOpenAiRetry("structured-extraction", async () => {
+      const extractResp = await Promise.race([
+        extractClient.chat.completions.create({
+          model,
+          max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
+          temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt + truncatedText },
+          ],
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`GPT-4o-mini extraction timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+        ),
+      ]);
 
-    const raw = extractResp.choices[0]?.message?.content ?? "";
-    const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
-    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const raw = extractResp.choices[0]?.message?.content ?? "";
+      const extractFinishReason = extractResp.choices[0]?.finish_reason ?? null;
+      const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
-    try {
-      return { rawParsed: parseJsonWithObjectFallback(cleaned) };
-    } catch {
-      const hint =
-        extractFinishReason === "length"
-          ? " (model output was truncated — finish_reason=length)"
-          : "";
-      throw new Error(
-        `Extraction returned invalid JSON${hint}. Raw response (prefix): ${raw.slice(0, 1200)}`
+      try {
+        return { rawParsed: parseJsonWithObjectFallback(cleaned) };
+      } catch {
+        const hint =
+          extractFinishReason === "length"
+            ? " (model output was truncated — finish_reason=length)"
+            : "";
+        throw new Error(
+          `Extraction returned invalid JSON${hint}. Raw response (prefix): ${raw.slice(0, 1200)}`
+        );
+      }
+    });
+
+  let rawParsed: unknown;
+  try {
+    ({ rawParsed } = await runExtraction(extractModel));
+  } catch (err) {
+    if (opts.fineTunedModelId) {
+      console.warn(
+        `[extraction] Fine-tuned model ${opts.fineTunedModelId} failed; falling back to base model ${EXTRACT_MODEL}. Error: ${String(err)}`
       );
+      ({ rawParsed } = await runExtraction(EXTRACT_MODEL));
+    } else {
+      throw err;
     }
-  });
+  }
 
   const validation = InvoiceExtractionSchema.safeParse(rawParsed);
   let parsed: InvoiceExtraction;
