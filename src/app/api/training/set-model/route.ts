@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
  * Body: { modelId: string }
  *
  * Persists a fine-tuned model ID to the settings table so all subsequent
- * extractions use it. Mirrors what scripts/set-finetune-model.ts does but
- * accessible at runtime without DB access.
+ * extractions use it. Uses raw SQL for compatibility across both the old
+ * schema (key-only PK) and the new schema (organizationId + key composite PK).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -20,15 +20,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "modelId is required" }, { status: 400 });
     }
 
-    await prisma.setting.upsert({
-      where: { organizationId_key: { organizationId: "default", key: "finetune_model_id" } },
-      update: { value: modelId },
-      create: { organizationId: "default", key: "finetune_model_id", value: modelId },
-    });
+    // Try new schema first (composite PK: organizationId + key)
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO settings ("organizationId", key, value, "updatedAt")
+        VALUES ('default', 'finetune_model_id', ${modelId}, datetime('now'))
+        ON CONFLICT("organizationId", key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
+      `;
+    } catch {
+      // Fall back to old schema (key-only PK, no organizationId column)
+      await prisma.$executeRaw`
+        INSERT INTO settings (key, value, "updatedAt")
+        VALUES ('finetune_model_id', ${modelId}, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
+      `;
+    }
 
     return NextResponse.json({ modelId });
   } catch (err) {
     console.error("[training/set-model]", err);
-    return NextResponse.json({ error: "Failed to save model ID" }, { status: 500 });
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
