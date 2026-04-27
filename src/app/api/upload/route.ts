@@ -39,7 +39,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // seconds — raise to 300 on Vercel Pro if needed
 
 const MAX_FILES = 2500;
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB
 const MAX_ZIP_ENTRIES = 2000;
 const MAX_ANONYMOUS_INLINE_FILES = 20;
 const QUEUE_ENQUEUE_TIMEOUT_MS = Math.max(
@@ -258,7 +258,7 @@ export async function POST(request: NextRequest) {
           referenceNo: "",
           fileName: file.name,
           status: "error",
-          error: "File exceeds 20 MB limit",
+          error: "File exceeds 30 MB limit",
         });
         continue;
       }

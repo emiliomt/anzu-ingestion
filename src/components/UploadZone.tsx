@@ -41,7 +41,7 @@ interface UploadZoneProps {
 }
 
 const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
-const MAX_SIZE = 20 * 1024 * 1024;
+const MAX_SIZE = 30 * 1024 * 1024;
 const MAX_FILES = 250;
 const UPLOAD_BATCH_SIZE = 10;
 const UPLOAD_MAX_CONCURRENCY = 1;
@@ -93,7 +93,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
         id: Math.random().toString(36).slice(2),
         status: "pending",
         error:
-          f.size > MAX_SIZE ? "File exceeds 20 MB limit" : undefined,
+          f.size > MAX_SIZE ? "File exceeds 30 MB limit" : undefined,
       }));
     setFiles((prev) => [...prev, ...mapped]);
   }, [files.length]);
@@ -348,7 +348,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 20 MB per file · Up to 250 files
+          PDF, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 30 MB per file · Up to 250 files
         </p>
       </div>
 
