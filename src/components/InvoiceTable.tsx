@@ -39,7 +39,9 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmDeleteDuplicates, setConfirmDeleteDuplicates] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [deletingDuplicates, setDeletingDuplicates] = useState(false);
 
   // ERP export
   const [showErpModal, setShowErpModal] = useState(false);
@@ -160,6 +162,26 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
     }
   };
 
+  const handleDeleteDuplicates = async () => {
+    setDeletingDuplicates(true);
+    try {
+      await fetch("/api/invoices", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteDuplicates: true }),
+      });
+      setCheckedIds(new Set());
+      setConfirmDeleteDuplicates(false);
+      setConfirmBulkDelete(false);
+      onBulkDeleted?.();
+      await fetchInvoices(1);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingDuplicates(false);
+    }
+  };
+
   const openErpModal = async () => {
     try {
       const res = await fetch("/api/erp-profiles");
@@ -249,10 +271,43 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
             <Download className="w-4 h-4" />
             Export
           </button>
+          {!confirmDeleteDuplicates ? (
+            <button
+              onClick={() => {
+                setConfirmDeleteDuplicates(true);
+                setConfirmDeleteAll(false);
+                setConfirmBulkDelete(false);
+              }}
+              className="btn-secondary text-orange-700 border-orange-200 hover:bg-orange-50"
+              title="Delete duplicate invoices only"
+            >
+              <Trash2 className="w-4 h-4" />
+              Remove duplicates
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-2 py-1">
+              <span className="text-xs text-orange-700 font-medium">Delete duplicate invoices?</span>
+              <button
+                onClick={handleDeleteDuplicates}
+                disabled={deletingDuplicates}
+                className="text-xs px-2.5 py-1 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50 transition-colors"
+              >
+                {deletingDuplicates ? "Deleting…" : "Yes"}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteDuplicates(false)}
+                disabled={deletingDuplicates}
+                className="text-xs px-2.5 py-1 border border-orange-200 text-orange-700 rounded-md hover:bg-orange-100 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {!confirmDeleteAll ? (
             <button
               onClick={() => {
                 setConfirmDeleteAll(true);
+                setConfirmDeleteDuplicates(false);
                 setConfirmBulkDelete(false);
               }}
               className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
