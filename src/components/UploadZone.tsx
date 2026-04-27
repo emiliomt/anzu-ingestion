@@ -159,11 +159,15 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
           referenceNo?: string;
           error?: string;
         }>();
+        const unmatchedResults: UploadApiResult[] = [];
 
         for (const r of data.results) {
           const matches = batchByName.get(r.fileName);
           const target = matches?.shift();
-          if (!target) continue;
+          if (!target) {
+            unmatchedResults.push(r);
+            continue;
+          }
 
           if (r.status === "received") {
             refs.push(r.referenceNo);
@@ -175,6 +179,46 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "", organization
             resultById.set(target.id, {
               status: "error",
               error: r.error ?? "Upload failed",
+            });
+          }
+        }
+
+        // ZIP uploads return results for extracted inner filenames (not the .zip name).
+        // If we couldn't map by filename, fall back to assigning unmatched results
+        // to unresolved batch rows so they don't stay stuck in "uploading".
+        const unresolved = batch.filter((f) => !resultById.has(f.id));
+        for (const fileItem of unresolved) {
+          const fallback = unmatchedResults.shift();
+          if (fallback) {
+            if (fallback.status === "received") {
+              refs.push(fallback.referenceNo);
+              resultById.set(fileItem.id, {
+                status: "success",
+                referenceNo: fallback.referenceNo,
+              });
+            } else {
+              resultById.set(fileItem.id, {
+                status: "error",
+                error: fallback.error ?? "Upload failed",
+              });
+            }
+            continue;
+          }
+
+          const firstSuccess = data.results.find((r) => r.status === "received");
+          if (firstSuccess) {
+            refs.push(firstSuccess.referenceNo);
+            resultById.set(fileItem.id, {
+              status: "success",
+              referenceNo: firstSuccess.referenceNo,
+            });
+          } else {
+            const firstError = data.results.find(
+              (r) => r.status === "error" && typeof r.error === "string" && r.error.trim().length > 0
+            );
+            resultById.set(fileItem.id, {
+              status: "error",
+              error: firstError?.error ?? "Upload failed",
             });
           }
         }
