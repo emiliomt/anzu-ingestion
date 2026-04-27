@@ -131,17 +131,32 @@ export async function DELETE(request: NextRequest) {
     const body = (await request.json().catch(() => ({}))) as {
       ids?: string[];
       deleteAll?: boolean;
+      deleteDuplicates?: boolean;
     };
+
+    const orgScope = orgId
+      ? { OR: [{ organizationId: orgId }, { organizationId: null }] }
+      : {};
 
     // Only delete invoices belonging to the current org.
     // Also match organizationId IS NULL for legacy rows uploaded before org-scoping was enforced.
     if (body.deleteAll) {
+      const { count } = await prisma.invoice.deleteMany({ where: orgScope });
+      return NextResponse.json({ success: true, deleted: count, scope: "all" });
+    }
+
+    if (body.deleteDuplicates) {
       const where = orgId
-        ? { OR: [{ organizationId: orgId }, { organizationId: null }] }
-        : {};
+        ? {
+            AND: [
+              orgScope,
+              { OR: [{ isDuplicate: true }, { flags: { contains: "duplicate" } }] },
+            ],
+          }
+        : { OR: [{ isDuplicate: true }, { flags: { contains: "duplicate" } }] };
 
       const { count } = await prisma.invoice.deleteMany({ where });
-      return NextResponse.json({ success: true, deleted: count, scope: "all" });
+      return NextResponse.json({ success: true, deleted: count, scope: "duplicates" });
     }
 
     if (!Array.isArray(body.ids) || body.ids.length === 0) {
