@@ -308,8 +308,8 @@ export default function ProviderPortal() {
           {/* Right column */}
           <div className="lg:col-span-2 space-y-4">
             {[
-              { icon: Mail,          color: "#F97316", bg: "#FFF7ED", title: "Email Submission", desc: "Send your PDF or image invoice to:", code: "invoices@anzu.mx" },
-              { icon: MessageCircle, color: "#10B981", bg: "#ECFDF5", title: "WhatsApp",          desc: "Send your invoice image or PDF to:", code: "+1 (415) 523-8886" },
+              { icon: Mail,          color: "#F97316", bg: "#FFF7ED", title: "Email Submission", desc: "Send your PDF, XML, or image invoice to:", code: "invoices@anzu.mx" },
+              { icon: MessageCircle, color: "#10B981", bg: "#ECFDF5", title: "WhatsApp",          desc: "Send your invoice image, PDF, or XML to:", code: "+1 (415) 523-8886" },
             ].map((ch) => {
               const Icon = ch.icon;
               return (
