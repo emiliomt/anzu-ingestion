@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Upload, LogOut } from "lucide-react";
+import { Menu, Upload, Zap, LogOut } from "lucide-react";
 import { useUser, useClerk } from "@clerk/nextjs";
 
 interface AdminTopbarProps {
@@ -42,6 +42,17 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
         >
           <Upload className="w-4 h-4" />
           Upload Invoice
+        </Link>
+        <Link
+          href="/portal"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white"
+          style={{
+            background: "linear-gradient(135deg, #F97316, #EA580C)",
+            boxShadow: "0 4px 12px rgba(249,115,22,0.3)",
+          }}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          Process with AI
         </Link>
         {/* User + logout */}
         {user && (
