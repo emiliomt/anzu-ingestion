@@ -38,6 +38,7 @@ export default function AdminDashboard() {
             selectedId={selectedInvoiceId ?? undefined}
             refreshKey={tableRefreshKey}
             onBulkDeleted={() => setTableRefreshKey((k) => k + 1)}
+            onBulkAiProcessed={() => setTableRefreshKey((k) => k + 1)}
           />
         </div>
 

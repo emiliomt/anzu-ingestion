@@ -28,6 +28,10 @@ export function safeJsonParse<T>(str: string, fallback: T): T {
 export function mimeLabel(mime: string): string {
   const map: Record<string, string> = {
     "application/pdf": "PDF",
+    "application/xml": "XML",
+    "text/xml": "XML",
+    "application/zip": "ZIP",
+    "application/x-zip-compressed": "ZIP",
     "image/jpeg": "JPEG",
     "image/jpg": "JPEG",
     "image/png": "PNG",
@@ -62,25 +66,80 @@ export function confidenceColor(score: number | null): string {
 }
 
 /** Check if a MIME type is acceptable */
-export function isValidMime(mime: string): boolean {
-  const allowed = [
-    "application/pdf",
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/heic",
-    "image/tiff",
-    "image/webp",
-    // Colombian UBL XML electronic invoices
-    "text/xml",
-    "application/xml",
-  ];
-  return allowed.includes(mime);
+export type InvoiceFileKind = "pdf" | "xml" | "image" | "zip" | "unsupported";
+
+const XML_MIMES = new Set(["application/xml", "text/xml"]);
+const PDF_MIMES = new Set(["application/pdf"]);
+const IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/tiff",
+  "image/tif",
+  "image/webp",
+]);
+const ZIP_MIMES = new Set(["application/zip", "application/x-zip-compressed"]);
+
+function canonicalInvoiceMime(mime: string): string | null {
+  if (PDF_MIMES.has(mime)) return "application/pdf";
+  if (XML_MIMES.has(mime)) return "application/xml";
+  if (IMAGE_MIMES.has(mime)) {
+    if (mime === "image/jpg" || mime === "image/jpeg") return "image/jpeg";
+    if (mime === "image/heif" || mime === "image/heic") return "image/heic";
+    if (mime === "image/tif" || mime === "image/tiff") return "image/tiff";
+    return mime;
+  }
+  if (ZIP_MIMES.has(mime)) return "application/zip";
+  return null;
+}
+
+export function inferMimeFromFileName(name: string): string | null {
+  const lower = name.trim().toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".xml")) return "application/xml";
+  if (lower.endsWith(".jpeg") || lower.endsWith(".jpg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".heic") || lower.endsWith(".heif")) return "image/heic";
+  if (lower.endsWith(".tiff") || lower.endsWith(".tif")) return "image/tiff";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".zip")) return "application/zip";
+  return null;
+}
+
+export function classifyInvoiceFile(
+  mime: string,
+  fileName = ""
+): { kind: InvoiceFileKind; mimeType: string | null } {
+  const normalized = mime.toLowerCase().split(";")[0]?.trim() ?? "";
+  const canonicalMime = canonicalInvoiceMime(normalized);
+  const fallbackMime = inferMimeFromFileName(fileName);
+  const resolvedMime = canonicalMime ?? fallbackMime;
+
+  if (!resolvedMime) {
+    return { kind: "unsupported", mimeType: null };
+  }
+  if (resolvedMime === "application/pdf") {
+    return { kind: "pdf", mimeType: resolvedMime };
+  }
+  if (resolvedMime === "application/xml") {
+    return { kind: "xml", mimeType: resolvedMime };
+  }
+  if (resolvedMime === "application/zip") {
+    return { kind: "zip", mimeType: resolvedMime };
+  }
+  return { kind: "image", mimeType: resolvedMime };
+}
+
+export function isValidMime(mime: string, fileName = ""): boolean {
+  const { kind } = classifyInvoiceFile(mime, fileName);
+  return kind === "pdf" || kind === "image" || kind === "xml";
 }
 
 /** True when mime type represents a ZIP archive */
-export function isZipMime(mime: string): boolean {
-  return mime === "application/zip" || mime === "application/x-zip-compressed";
+export function isZipMime(mime: string, fileName = ""): boolean {
+  return classifyInvoiceFile(mime, fileName).kind === "zip";
 }
 
 /** Convert bytes to base64 (Node Buffer respects byteOffset; raw ArrayBuffer does not) */

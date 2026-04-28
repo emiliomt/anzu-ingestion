@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight, Trash2, FileOutput, Loader2, X } from "lucide-react";
+import { Search, Filter, Download, RefreshCw, ChevronLeft, ChevronRight, Trash2, FileOutput, Loader2, X, Sparkles } from "lucide-react";
 import { StatusBadge, ChannelBadge } from "./StatusBadge";
 import type { InvoiceListItem } from "@/types/invoice";
 import { format } from "date-fns";
@@ -11,6 +11,7 @@ interface InvoiceTableProps {
   selectedId?: string;
   refreshKey?: number;
   onBulkDeleted?: () => void;
+  onBulkAiProcessed?: () => void;
 }
 
 interface PaginationData {
@@ -25,7 +26,13 @@ function shortenModelLabel(modelId: string): string {
   return `${modelId.slice(0, 21)}...`;
 }
 
-export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDeleted }: InvoiceTableProps) {
+export function InvoiceTable({
+  onSelectInvoice,
+  selectedId,
+  refreshKey,
+  onBulkDeleted,
+  onBulkAiProcessed,
+}: InvoiceTableProps) {
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [pagination, setPagination] = useState<PaginationData>({
     page: 1, limit: 25, total: 0, totalPages: 0,
@@ -42,6 +49,7 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
   const [confirmDeleteDuplicates, setConfirmDeleteDuplicates] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingDuplicates, setDeletingDuplicates] = useState(false);
+  const [processingAi, setProcessingAi] = useState(false);
 
   // ERP export
   const [showErpModal, setShowErpModal] = useState(false);
@@ -245,6 +253,46 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
     window.open(`/api/export?${params}`, "_blank");
   };
 
+  const handleProcessWithAi = async () => {
+    setProcessingAi(true);
+    try {
+      let cursor: string | null = null;
+      let hasMore = true;
+      let loops = 0;
+
+      while (hasMore && loops < 25) {
+        loops += 1;
+
+        const classifyRes = await fetch("/api/invoices/classify-all", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cursor, batchSize: 8 }),
+        });
+        if (!classifyRes.ok) {
+          throw new Error("Classify-all failed");
+        }
+        const classifyData = await classifyRes.json() as {
+          hasMore?: boolean;
+          nextCursor?: string | null;
+        };
+        hasMore = Boolean(classifyData.hasMore);
+        cursor = classifyData.nextCursor ?? null;
+      }
+
+      const matchRes = await fetch("/api/matching/batch", { method: "POST" });
+      if (!matchRes.ok) {
+        throw new Error("Matching batch failed");
+      }
+      await fetchInvoices(1);
+      onBulkAiProcessed?.();
+    } catch (err) {
+      console.error("Bulk AI processing failed:", err);
+      alert("Could not complete bulk AI processing.");
+    } finally {
+      setProcessingAi(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -270,6 +318,17 @@ export function InvoiceTable({ onSelectInvoice, selectedId, refreshKey, onBulkDe
           <button onClick={handleExport} className="btn-secondary">
             <Download className="w-4 h-4" />
             Export
+          </button>
+          <button
+            onClick={handleProcessWithAi}
+            disabled={processingAi}
+            className="btn-secondary text-indigo-700 border-indigo-200 hover:bg-indigo-50 disabled:opacity-60"
+            title="Run AI line classification for all invoices and then re-run matching"
+          >
+            {processingAi
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <Sparkles className="w-4 h-4" />}
+            {processingAi ? "Processing AI…" : "Classify all"}
           </button>
           {!confirmDeleteDuplicates ? (
             <button

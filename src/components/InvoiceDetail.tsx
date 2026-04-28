@@ -18,6 +18,37 @@ interface InvoiceDetailProps {
   onDeleted?: () => void;
 }
 
+async function parseClassifyResponse(res: Response): Promise<{
+  error?: string;
+  lineItems?: InvoiceDetailType["lineItems"];
+  updatedCount?: number;
+}> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { error: `Empty server response (${res.status})` };
+  }
+  try {
+    return JSON.parse(text) as {
+      error?: string;
+      lineItems?: InvoiceDetailType["lineItems"];
+      updatedCount?: number;
+    };
+  } catch {
+    const preview = text.slice(0, 160).replace(/\s+/g, " ").trim();
+    const lowerPreview = preview.toLowerCase();
+    if (
+      lowerPreview.includes("<!doctype html") ||
+      lowerPreview.includes("<html")
+    ) {
+      return {
+        error:
+          "Classification request was redirected or blocked before reaching the API. Please refresh and try again in your organization workspace.",
+      };
+    }
+    return { error: preview || "Server returned non-JSON response." };
+  }
+}
+
 const FIELD_LABELS: Record<string, string> = {
   vendor_name: "Vendor Name",
   vendor_address: "Vendor Address",
@@ -48,6 +79,7 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [savingGT, setSavingGT] = useState(false);
   const [gtToast, setGtToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -179,13 +211,17 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
 
   const handleClassify = async () => {
     setClassifying(true);
+    setClassifyError(null);
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/classify`, { method: "POST" });
-      if (!res.ok) throw new Error("Classify request failed");
-      const data = await res.json() as { lineItems: InvoiceDetailType["lineItems"] };
-      setInvoice((prev) => prev ? { ...prev, lineItems: data.lineItems } : prev);
+      const data = await parseClassifyResponse(res);
+      if (!res.ok) throw new Error(data.error ?? "Classify request failed");
+      if (!Array.isArray(data.lineItems)) throw new Error("Classifier returned an invalid response");
+
+      setInvoice((prev) => prev ? { ...prev, lineItems: data.lineItems ?? prev.lineItems } : prev);
     } catch (err) {
       console.error("[Classify]", err);
+      setClassifyError(err instanceof Error ? err.message : "Classification failed");
     } finally {
       setClassifying(false);
     }
@@ -557,6 +593,9 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
                 <p className="text-xs text-gray-400 italic">
                   No line items extracted yet. Click &ldquo;Classify with AI&rdquo; to run AI classification.
                 </p>
+              )}
+              {classifyError && (
+                <p className="mt-2 text-xs text-red-600">{classifyError}</p>
               )}
             </div>
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestMatch } from "@/lib/matcher";
 import { getSettings } from "@/lib/app-settings";
+import { boostMatchConfidence, normalizeConfidence } from "@/lib/matching-confidence";
 
 export const dynamic = "force-dynamic";
 
@@ -23,25 +24,36 @@ export async function POST(request: NextRequest) {
     const settings = await getSettings(invoice.organizationId ?? null);
     const autoConfirmThreshold = settings.auto_approve_threshold;
     const result = await suggestMatch(invoiceId);
+    const baseConfidence = normalizeConfidence(result.confidence);
+    const matchedConfidence =
+      result.matchType !== "unmatched"
+        ? boostMatchConfidence(baseConfidence)
+        : baseConfidence;
     const shouldAutoConfirm =
       autoConfirmThreshold !== null &&
       result.matchType !== "unmatched" &&
-      result.confidence >= autoConfirmThreshold;
+      matchedConfidence >= autoConfirmThreshold;
+    const confidenceToStore =
+      result.matchType !== "unmatched"
+        ? boostMatchConfidence(baseConfidence, { isConfirmed: shouldAutoConfirm })
+        : baseConfidence;
 
     // Upsert suggestion in DB. Auto-confirm when confidence meets configured threshold.
     const existing = await prisma.invoiceMatch.findFirst({
       where: { invoiceId, isConfirmed: false },
     });
 
-    if (existing) {
+    if (existing && result.matchType === "unmatched") {
+      await prisma.invoiceMatch.delete({ where: { id: existing.id } });
+    } else if (existing) {
       await prisma.invoiceMatch.update({
         where: { id: existing.id },
         data: {
-          matchType: result.matchType === "unmatched" ? "project" : result.matchType,
+          matchType: result.matchType,
           projectId: result.matchType === "project" ? result.matchId : null,
           purchaseOrderId: result.matchType === "purchase_order" ? result.matchId : null,
           cajaChicaId: result.matchType === "caja_chica" ? result.matchId : null,
-          confidence: result.confidence,
+          confidence: confidenceToStore,
           reasoning: result.reasoning,
           matchedBy: "ai",
           matchedAt: new Date(),
@@ -58,7 +70,7 @@ export async function POST(request: NextRequest) {
           projectId: result.matchType === "project" ? result.matchId : null,
           purchaseOrderId: result.matchType === "purchase_order" ? result.matchId : null,
           cajaChicaId: result.matchType === "caja_chica" ? result.matchId : null,
-          confidence: result.confidence,
+          confidence: confidenceToStore,
           reasoning: result.reasoning,
           matchedBy: "ai",
           isConfirmed: shouldAutoConfirm,
@@ -68,7 +80,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      confidence: confidenceToStore,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: msg }, { status: 500 });

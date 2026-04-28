@@ -21,6 +21,16 @@ export interface ClassificationResult {
   confidence: number;
 }
 
+export class LineItemClassificationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "api_error" | "invalid_json" | "no_valid_categories"
+  ) {
+    super(message);
+    this.name = "LineItemClassificationError";
+  }
+}
+
 // ── OpenAI client wrapper ───────────────────────────────────────────────────
 function getClient() {
   return getOpenAIClient();
@@ -109,8 +119,10 @@ export async function classifyLineItems(
     });
     raw = resp.choices[0]?.message?.content ?? "{}";
   } catch (err) {
-    console.error("[Classifier] API error:", err);
-    return descriptions.map(() => ({ category: null, confidence: 0 }));
+    throw new LineItemClassificationError(
+      `Classification API request failed: ${err instanceof Error ? err.message : String(err)}`,
+      "api_error"
+    );
   }
 
   // Parse response
@@ -118,8 +130,10 @@ export async function classifyLineItems(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    console.error("[Classifier] Invalid JSON:", raw.slice(0, 300));
-    return descriptions.map(() => ({ category: null, confidence: 0 }));
+    throw new LineItemClassificationError(
+      `Classifier returned invalid JSON: ${raw.slice(0, 200)}`,
+      "invalid_json"
+    );
   }
 
   // Support both { items: [...] } and bare array
@@ -137,17 +151,54 @@ export async function classifyLineItems(
     "overhead", "tax", "discount", "other",
   ]);
 
-  return descriptions.map((_, i) => {
+  function normalizeCategory(value: unknown): LineItemCategory | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.toLowerCase().trim();
+    if (VALID_CATEGORIES.has(normalized)) return normalized as LineItemCategory;
+
+    const aliases: Record<string, LineItemCategory> = {
+      materials: "material",
+      materiales: "material",
+      labour: "labor",
+      services: "labor",
+      servicio: "labor",
+      servicios: "labor",
+      equipments: "equipment",
+      shipping: "freight",
+      transport: "freight",
+      transporte: "freight",
+      taxes: "tax",
+      iva: "tax",
+      vat: "tax",
+      descuentos: "discount",
+      descuento: "discount",
+      others: "other",
+      otro: "other",
+      otros: "other",
+    };
+    return aliases[normalized] ?? null;
+  }
+
+  const mapped = descriptions.map((_, i) => {
     const item = arr[i] as Record<string, unknown> | undefined;
     if (!item) return { category: null, confidence: 0 };
 
-    const cat = typeof item.category === "string" && VALID_CATEGORIES.has(item.category)
-      ? (item.category as LineItemCategory)
-      : null;
+    const cat = normalizeCategory(item.category);
     const confidence = typeof item.confidence === "number"
       ? Math.min(1, Math.max(0, item.confidence))
       : 0.8;
 
     return { category: cat, confidence };
   });
+
+  const nonBlankInputCount = descriptions.filter((d) => (d?.trim() ?? "").length > 0).length;
+  const nonNullCategoryCount = mapped.filter((m) => m.category !== null).length;
+  if (nonBlankInputCount > 0 && nonNullCategoryCount === 0) {
+    throw new LineItemClassificationError(
+      "Classifier returned no valid categories for non-empty line items.",
+      "no_valid_categories"
+    );
+  }
+
+  return mapped;
 }

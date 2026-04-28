@@ -64,6 +64,8 @@ const requiresOrg = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
+  const isApiRoute = req.nextUrl.pathname.startsWith("/api/");
+
   // Public routes — skip all checks
   if (isPublic(req)) return NextResponse.next();
 
@@ -72,6 +74,9 @@ export default clerkMiddleware(async (auth, req) => {
 
   // Not authenticated — redirect to sign-in
   if (!userId) {
+    if (isApiRoute) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
     const signInUrl = new URL("/sign-in", req.url);
     signInUrl.searchParams.set("redirect_url", req.url);
     return NextResponse.redirect(signInUrl);
@@ -91,6 +96,12 @@ export default clerkMiddleware(async (auth, req) => {
       });
 
       if (memberships.length === 0) {
+        if (isApiRoute) {
+          return NextResponse.json(
+            { error: "Active organization required" },
+            { status: 403 }
+          );
+        }
         // User genuinely has no org — send to creation flow
         const dest = new URL("/org-required", req.url);
         dest.searchParams.set("return_to", req.nextUrl.pathname);
@@ -107,6 +118,12 @@ export default clerkMiddleware(async (auth, req) => {
       return NextResponse.next({ request: { headers: reqHeaders } });
     } catch (err) {
       console.error("[middleware] org membership lookup failed:", err);
+      if (isApiRoute) {
+        return NextResponse.json(
+          { error: "Unable to resolve organization membership" },
+          { status: 503 }
+        );
+      }
       // Fall through to org-required on API error
       const dest = new URL("/org-required", req.url);
       dest.searchParams.set("return_to", req.nextUrl.pathname);

@@ -12,7 +12,12 @@ import { extractInvoiceWithOcr, buildDuplicateKey } from "@/lib/claude";
 import { buildFewShotSection } from "@/lib/few-shot";
 import { runSecurityCheck } from "@/lib/security-client";
 import { sendConfirmationEmail } from "@/lib/email";
-import { generateReferenceNo, isValidMime, isZipMime } from "@/lib/utils";
+import {
+  classifyInvoiceFile,
+  generateReferenceNo,
+  isValidMime,
+  isZipMime,
+} from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 import { checkQuotaOrNull } from "@/lib/quota";
 
@@ -243,12 +248,12 @@ export async function POST(request: NextRequest) {
 
   for (const file of expandedFiles) {
     try {
-      if (!isValidMime(file.type)) {
+      if (!isValidMime(file.type, file.name)) {
         results.push({
           referenceNo: "",
           fileName: file.name,
           status: "error",
-          error: `Unsupported file type: ${file.type}`,
+          error: `Unsupported file type: ${file.type || file.name}`,
         });
         continue;
       }
@@ -370,7 +375,7 @@ async function expandIncomingFiles(files: File[]): Promise<UploadInputFile[]> {
   const expanded: UploadInputFile[] = [];
 
   for (const file of files) {
-    if (isZipMime(file.type) || file.name.toLowerCase().endsWith(".zip")) {
+    if (isZipMime(file.type, file.name)) {
       const zipBuffer = Buffer.from(await file.arrayBuffer());
       const zip = await JSZip.loadAsync(zipBuffer);
       const zipEntries = Object.values(zip.files).filter((entry) => !entry.dir);
@@ -386,15 +391,14 @@ async function expandIncomingFiles(files: File[]): Promise<UploadInputFile[]> {
 
       for (const entry of zipEntries) {
         const entryName = entry.name.split("/").pop() || entry.name;
-        const entryLower = entryName.toLowerCase();
-        const inferredMime = inferMimeFromName(entryLower);
-        if (!inferredMime || !isValidMime(inferredMime)) {
+        const classified = classifyInvoiceFile("", entryName);
+        if (!classified.mimeType || !isValidMime(classified.mimeType, entryName)) {
           continue;
         }
         const entryBuffer = await entry.async("nodebuffer");
         expanded.push({
           name: entryName,
-          type: inferredMime,
+          type: classified.mimeType,
           size: entryBuffer.length,
           buffer: entryBuffer,
         });
@@ -403,26 +407,16 @@ async function expandIncomingFiles(files: File[]): Promise<UploadInputFile[]> {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const classified = classifyInvoiceFile(file.type, file.name);
     expanded.push({
       name: file.name,
-      type: file.type || inferMimeFromName(file.name.toLowerCase()) || "application/octet-stream",
+      type: classified.mimeType ?? "application/octet-stream",
       size: file.size,
       buffer,
     });
   }
 
   return expanded;
-}
-
-function inferMimeFromName(name: string): string | null {
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".jpeg") || name.endsWith(".jpg")) return "image/jpeg";
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".heic") || name.endsWith(".heif")) return "image/heic";
-  if (name.endsWith(".tiff") || name.endsWith(".tif")) return "image/tiff";
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".xml")) return "application/xml";
-  return null;
 }
 
 /** Background: extract invoice data using Claude, then update DB */
@@ -490,6 +484,7 @@ async function processInvoice(
 
     // Duplicate detection (only when enabled in settings)
     const invoiceNumberValue = extraction.invoice_number?.value;
+    const vendorTaxIdValue = extraction.vendor_tax_id?.value;
     const duplicateKey = buildDuplicateKey(
       typeof invoiceNumberValue === "string" ? invoiceNumberValue : null,
       typeof vendorNameValue === "string" ? vendorNameValue : null
@@ -499,24 +494,44 @@ async function processInvoice(
     let duplicateOf: string | null = null;
 
     if (settings.flag_duplicates && duplicateKey) {
-      // Look for existing invoice with same vendor + invoice number
+      // Duplicate requires same invoice number AND (vendor_tax_id OR vendorId)
       const invoiceNum = typeof invoiceNumberValue === "string" ? invoiceNumberValue : null;
-      const vendorName = typeof vendorNameValue === "string" ? vendorNameValue : null;
+      const vendorTaxId = typeof vendorTaxIdValue === "string" ? vendorTaxIdValue.trim() : "";
 
-      if (invoiceNum) {
-        const existingField = await prisma.extractedField.findFirst({
-          where: {
-            fieldName: "invoice_number",
-            value: invoiceNum,
-            invoice: {
-              id: { not: invoiceId },
-              isDuplicate: false, // only originals can be the source of truth
-              ...(vendorId ? { vendorId } : {}),
+      const duplicateClauses: Array<Record<string, unknown>> = [];
+      if (vendorId) {
+        duplicateClauses.push({
+          fieldName: "invoice_number",
+          value: invoiceNum,
+          invoice: {
+            id: { not: invoiceId },
+            isDuplicate: false, // only originals can be the source of truth
+            vendorId,
+          },
+        });
+      }
+      if (vendorTaxId.length > 0) {
+        duplicateClauses.push({
+          fieldName: "invoice_number",
+          value: invoiceNum,
+          invoice: {
+            id: { not: invoiceId },
+            isDuplicate: false,
+            extractedData: {
+              some: {
+                fieldName: "vendor_tax_id",
+                value: vendorTaxId,
+              },
             },
           },
+        });
+      }
+
+      if (invoiceNum && duplicateClauses.length > 0) {
+        const existingField = await prisma.extractedField.findFirst({
+          where: { OR: duplicateClauses },
           include: { invoice: true },
         });
-
         if (existingField) {
           isDuplicate = true;
           duplicateOf = existingField.invoiceId;

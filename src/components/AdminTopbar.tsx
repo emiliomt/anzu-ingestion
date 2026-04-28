@@ -54,7 +54,6 @@ export function AdminTopbar({ onMenuClick, pageTitle = "Dashboard" }: AdminTopba
           <Zap className="w-3.5 h-3.5" />
           Process with AI
         </Link>
-
         {/* User + logout */}
         {user && (
           <div className="flex items-center gap-2 pl-2 border-l border-gray-200">

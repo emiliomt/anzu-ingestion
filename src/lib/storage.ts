@@ -27,6 +27,8 @@ export interface StoredFile {
 function extFromMime(mime: string): string {
   const map: Record<string, string> = {
     "application/pdf": "pdf",
+    "application/xml": "xml",
+    "text/xml": "xml",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
     "image/png": "png",
