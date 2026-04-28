@@ -50,7 +50,21 @@ export async function POST(
 
   // Run the focused classifier
   const descriptions = invoice.lineItems.map((li) => li.description);
-  const results = await classifyLineItems(descriptions, { concept, vendorName });
+  let results;
+  try {
+    results = await classifyLineItems(descriptions, { concept, vendorName });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Line-item classification failed";
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+
+  const classifiedResults = results.filter((r) => r.category !== null);
+  if (classifiedResults.length === 0) {
+    return NextResponse.json(
+      { error: "AI returned no valid line-item categories for this invoice." },
+      { status: 422 }
+    );
+  }
 
   // Persist updated categories
   await Promise.all(

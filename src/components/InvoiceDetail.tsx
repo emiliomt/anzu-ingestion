@@ -48,6 +48,7 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const [savingGT, setSavingGT] = useState(false);
   const [gtToast, setGtToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -179,13 +180,21 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
 
   const handleClassify = async () => {
     setClassifying(true);
+    setClassifyError(null);
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/classify`, { method: "POST" });
-      if (!res.ok) throw new Error("Classify request failed");
-      const data = await res.json() as { lineItems: InvoiceDetailType["lineItems"] };
-      setInvoice((prev) => prev ? { ...prev, lineItems: data.lineItems } : prev);
+      const data = await res.json() as {
+        error?: string;
+        lineItems?: InvoiceDetailType["lineItems"];
+        updatedCount?: number;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Classify request failed");
+      if (!Array.isArray(data.lineItems)) throw new Error("Classifier returned an invalid response");
+
+      setInvoice((prev) => prev ? { ...prev, lineItems: data.lineItems ?? prev.lineItems } : prev);
     } catch (err) {
       console.error("[Classify]", err);
+      setClassifyError(err instanceof Error ? err.message : "Classification failed");
     } finally {
       setClassifying(false);
     }
@@ -557,6 +566,9 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
                 <p className="text-xs text-gray-400 italic">
                   No line items extracted yet. Click &ldquo;Classify with AI&rdquo; to run AI classification.
                 </p>
+              )}
+              {classifyError && (
+                <p className="mt-2 text-xs text-red-600">{classifyError}</p>
               )}
             </div>
 
