@@ -35,6 +35,16 @@ async function parseClassifyResponse(res: Response): Promise<{
     };
   } catch {
     const preview = text.slice(0, 160).replace(/\s+/g, " ").trim();
+    const lowerPreview = preview.toLowerCase();
+    if (
+      lowerPreview.includes("<!doctype html") ||
+      lowerPreview.includes("<html")
+    ) {
+      return {
+        error:
+          "Classification request was redirected or blocked before reaching the API. Please refresh and try again in your organization workspace.",
+      };
+    }
     return { error: preview || "Server returned non-JSON response." };
   }
 }
