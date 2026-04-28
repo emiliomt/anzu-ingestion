@@ -484,6 +484,7 @@ async function processInvoice(
 
     // Duplicate detection (only when enabled in settings)
     const invoiceNumberValue = extraction.invoice_number?.value;
+    const vendorTaxIdValue = extraction.vendor_tax_id?.value;
     const duplicateKey = buildDuplicateKey(
       typeof invoiceNumberValue === "string" ? invoiceNumberValue : null,
       typeof vendorNameValue === "string" ? vendorNameValue : null
@@ -493,24 +494,44 @@ async function processInvoice(
     let duplicateOf: string | null = null;
 
     if (settings.flag_duplicates && duplicateKey) {
-      // Look for existing invoice with same vendor + invoice number
+      // Duplicate requires same invoice number AND (vendor_tax_id OR vendorId)
       const invoiceNum = typeof invoiceNumberValue === "string" ? invoiceNumberValue : null;
-      const vendorName = typeof vendorNameValue === "string" ? vendorNameValue : null;
+      const vendorTaxId = typeof vendorTaxIdValue === "string" ? vendorTaxIdValue.trim() : "";
 
-      if (invoiceNum) {
-        const existingField = await prisma.extractedField.findFirst({
-          where: {
-            fieldName: "invoice_number",
-            value: invoiceNum,
-            invoice: {
-              id: { not: invoiceId },
-              isDuplicate: false, // only originals can be the source of truth
-              ...(vendorId ? { vendorId } : {}),
+      const duplicateClauses: Array<Record<string, unknown>> = [];
+      if (vendorId) {
+        duplicateClauses.push({
+          fieldName: "invoice_number",
+          value: invoiceNum,
+          invoice: {
+            id: { not: invoiceId },
+            isDuplicate: false, // only originals can be the source of truth
+            vendorId,
+          },
+        });
+      }
+      if (vendorTaxId.length > 0) {
+        duplicateClauses.push({
+          fieldName: "invoice_number",
+          value: invoiceNum,
+          invoice: {
+            id: { not: invoiceId },
+            isDuplicate: false,
+            extractedData: {
+              some: {
+                fieldName: "vendor_tax_id",
+                value: vendorTaxId,
+              },
             },
           },
+        });
+      }
+
+      if (invoiceNum && duplicateClauses.length > 0) {
+        const existingField = await prisma.extractedField.findFirst({
+          where: { OR: duplicateClauses },
           include: { invoice: true },
         });
-
         if (existingField) {
           isDuplicate = true;
           duplicateOf = existingField.invoiceId;
