@@ -18,6 +18,27 @@ interface InvoiceDetailProps {
   onDeleted?: () => void;
 }
 
+async function parseClassifyResponse(res: Response): Promise<{
+  error?: string;
+  lineItems?: InvoiceDetailType["lineItems"];
+  updatedCount?: number;
+}> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { error: `Empty server response (${res.status})` };
+  }
+  try {
+    return JSON.parse(text) as {
+      error?: string;
+      lineItems?: InvoiceDetailType["lineItems"];
+      updatedCount?: number;
+    };
+  } catch {
+    const preview = text.slice(0, 160).replace(/\s+/g, " ").trim();
+    return { error: preview || "Server returned non-JSON response." };
+  }
+}
+
 const FIELD_LABELS: Record<string, string> = {
   vendor_name: "Vendor Name",
   vendor_address: "Vendor Address",
@@ -183,11 +204,7 @@ export function InvoiceDetail({ invoiceId, onClose, onStatusChange, onDeleted }:
     setClassifyError(null);
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/classify`, { method: "POST" });
-      const data = await res.json() as {
-        error?: string;
-        lineItems?: InvoiceDetailType["lineItems"];
-        updatedCount?: number;
-      };
+      const data = await parseClassifyResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Classify request failed");
       if (!Array.isArray(data.lineItems)) throw new Error("Classifier returned an invalid response");
 

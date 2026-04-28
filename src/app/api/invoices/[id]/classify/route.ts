@@ -17,95 +17,103 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-
-  // Fetch the invoice with its line items and extracted fields
-  const invoice = await prisma.invoice.findUnique({
-    where: { id },
-    include: {
-      vendor: true,
-      lineItems: true,
-      extractedData: {
-        where: { fieldName: { in: ["concept", "description_summary", "vendor_name"] } },
-      },
-    },
-  });
-
-  if (!invoice) {
-    return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-  }
-
-  if (invoice.lineItems.length === 0) {
-    return NextResponse.json({ lineItems: [] });
-  }
-
-  // Gather context fields from extracted data
-  const fieldMap: Record<string, string | null> = {};
-  for (const f of invoice.extractedData) {
-    fieldMap[f.fieldName] = f.value ?? null;
-  }
-
-  const concept    = fieldMap["concept"] ?? fieldMap["description_summary"] ?? null;
-  const vendorName = invoice.vendor?.name ?? fieldMap["vendor_name"] ?? null;
-
-  // Run the focused classifier
-  const descriptions = invoice.lineItems.map((li) => li.description);
-  let results;
   try {
-    results = await classifyLineItems(descriptions, { concept, vendorName });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Line-item classification failed";
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
+    const { id } = await params;
 
-  const classifiedResults = results.filter((r) => r.category !== null);
-  if (classifiedResults.length === 0) {
+    // Fetch the invoice with its line items and extracted fields
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: {
+        vendor: true,
+        lineItems: true,
+        extractedData: {
+          where: { fieldName: { in: ["concept", "description_summary", "vendor_name"] } },
+        },
+      },
+    });
+
+    if (!invoice) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    if (invoice.lineItems.length === 0) {
+      return NextResponse.json({ lineItems: [] });
+    }
+
+    // Gather context fields from extracted data
+    const fieldMap: Record<string, string | null> = {};
+    for (const f of invoice.extractedData) {
+      fieldMap[f.fieldName] = f.value ?? null;
+    }
+
+    const concept    = fieldMap["concept"] ?? fieldMap["description_summary"] ?? null;
+    const vendorName = invoice.vendor?.name ?? fieldMap["vendor_name"] ?? null;
+
+    // Run the focused classifier
+    const descriptions = invoice.lineItems.map((li) => li.description);
+    let results;
+    try {
+      results = await classifyLineItems(descriptions, { concept, vendorName });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Line-item classification failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+
+    const classifiedResults = results.filter((r) => r.category !== null);
+    if (classifiedResults.length === 0) {
+      return NextResponse.json(
+        { error: "AI returned no valid line-item categories for this invoice." },
+        { status: 422 }
+      );
+    }
+
+    // Persist updated categories
+    await Promise.all(
+      invoice.lineItems.map((li, i) => {
+        const result = results[i];
+        if (!result || result.category === null) return Promise.resolve();
+        return prisma.lineItem.update({
+          where: { id: li.id },
+          data: {
+            category:   result.category,
+            confidence: result.confidence,
+          },
+        });
+      })
+    );
+
+    // Log event
+    await prisma.ingestionEvent.create({
+      data: {
+        invoiceId: id,
+        eventType: "line_items_classified",
+        metadata: JSON.stringify({
+          itemCount:  invoice.lineItems.length,
+          concept,
+          vendorName,
+          categories: results.map((r) => r.category),
+        }),
+      },
+    });
+
+    // Return updated line items
+    const updated = await prisma.lineItem.findMany({ where: { invoiceId: id } });
+    return NextResponse.json({
+      lineItems: updated.map((li) => ({
+        id:          li.id,
+        description: li.description,
+        quantity:    li.quantity,
+        unitPrice:   li.unitPrice,
+        lineTotal:   li.lineTotal,
+        category:    li.category ?? null,
+        confidence:  li.confidence,
+      })),
+    });
+  } catch (err) {
+    console.error("[line-items-classify]", err);
     return NextResponse.json(
-      { error: "AI returned no valid line-item categories for this invoice." },
-      { status: 422 }
+      { error: "Unexpected server error while classifying line items." },
+      { status: 500 }
     );
   }
-
-  // Persist updated categories
-  await Promise.all(
-    invoice.lineItems.map((li, i) => {
-      const result = results[i];
-      if (!result || result.category === null) return Promise.resolve();
-      return prisma.lineItem.update({
-        where: { id: li.id },
-        data: {
-          category:   result.category,
-          confidence: result.confidence,
-        },
-      });
-    })
-  );
-
-  // Log event
-  await prisma.ingestionEvent.create({
-    data: {
-      invoiceId: id,
-      eventType: "line_items_classified",
-      metadata: JSON.stringify({
-        itemCount:  invoice.lineItems.length,
-        concept,
-        vendorName,
-        categories: results.map((r) => r.category),
-      }),
-    },
-  });
-
-  // Return updated line items
-  const updated = await prisma.lineItem.findMany({ where: { invoiceId: id } });
-  return NextResponse.json({
-    lineItems: updated.map((li) => ({
-      id:          li.id,
-      description: li.description,
-      quantity:    li.quantity,
-      unitPrice:   li.unitPrice,
-      lineTotal:   li.lineTotal,
-      category:    li.category ?? null,
-      confidence:  li.confidence,
-    })),
-  });
 }
