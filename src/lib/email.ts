@@ -93,7 +93,7 @@ export async function sendBounceEmail(
     html: `
 <p>We received your email but could not process it.</p>
 <p><strong>Reason:</strong> ${reason}</p>
-<p>Please ensure you attach a PDF or image file (JPEG, PNG) of your invoice and try again.</p>
+<p>Please ensure you attach a supported invoice file (PDF, XML, JPEG, PNG, HEIC, TIFF, or WebP) and try again.</p>
 <p>If you need help, please contact our support team.</p>
     `,
   });

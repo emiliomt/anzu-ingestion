@@ -7,7 +7,7 @@ import { getSettings } from "@/lib/app-settings";
 import { runSecurityCheck } from "@/lib/security-client";
 
 export const dynamic = "force-dynamic";
-import { generateReferenceNo, isValidMime } from "@/lib/utils";
+import { classifyInvoiceFile, generateReferenceNo } from "@/lib/utils";
 
 /**
  * POST /api/webhooks/email
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     if (senderEmail) {
       await sendBounceEmail(
         senderEmail,
-        "No valid invoice attachment found. Please attach a PDF or image file."
+        "No valid invoice attachment found. Please attach a PDF, XML, or image file."
       );
     }
     return NextResponse.json({ message: "No attachments" }, { status: 200 });
@@ -52,7 +52,14 @@ export async function POST(request: NextRequest) {
     const attachment = formData.get(`attachment${i}`) as File | null;
     if (!attachment) continue;
 
-    if (!isValidMime(attachment.type)) continue;
+    const classified = classifyInvoiceFile(attachment.type, attachment.name);
+    if (
+      classified.kind === "unsupported" ||
+      classified.kind === "zip" ||
+      !classified.mimeType
+    ) {
+      continue;
+    }
 
     const buffer = Buffer.from(await attachment.arrayBuffer());
     const referenceNo = generateReferenceNo();
@@ -60,7 +67,7 @@ export async function POST(request: NextRequest) {
     const stored = await storeFile(
       buffer,
       attachment.name,
-      attachment.type,
+      classified.mimeType,
       "email"
     );
 
@@ -115,7 +122,7 @@ export async function POST(request: NextRequest) {
     if (senderEmail) {
       await sendBounceEmail(
         senderEmail,
-        "No supported file types found. Please send PDF, JPEG, or PNG files."
+        "No supported file types found. Please send PDF, XML, JPEG, or PNG files."
       );
     }
     return NextResponse.json({ message: "No valid attachments" }, { status: 200 });

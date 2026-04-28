@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { storeFile } from "@/lib/storage";
 import { extractInvoice } from "@/lib/claude";
-import { generateReferenceNo } from "@/lib/utils";
+import { classifyInvoiceFile, generateReferenceNo, isValidMime } from "@/lib/utils";
 import { getSettings } from "@/lib/app-settings";
 
 export const dynamic = "force-dynamic";
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     await sendWhatsAppReply(
       from,
       toNumber,
-      "Hi! To submit an invoice, please send an image or PDF file. 📄\n\nTo check the status of an invoice, reply with your reference number (e.g. *AZ-2025-A1B2C3*).",
+      "Hi! To submit an invoice, please send a PDF, XML, or image file. 📄\n\nTo check the status of an invoice, reply with your reference number (e.g. *AZ-2025-A1B2C3*).",
       accountSid,
       authToken
     );
@@ -81,16 +81,11 @@ export async function POST(request: NextRequest) {
     const mediaUrl = (formData.get(`MediaUrl${i}`) as string | null) ?? "";
     const mediaContentType =
       (formData.get(`MediaContentType${i}`) as string | null) ?? "";
+    const mediaFileName =
+      (formData.get(`MediaFilename${i}`) as string | null) ??
+      `whatsapp-media-${i}`;
 
-    const ACCEPTED_TYPES = [
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/heic",
-      "image/tiff",
-    ];
-    if (!ACCEPTED_TYPES.includes(mediaContentType)) {
+    if (!isValidMime(mediaContentType, mediaFileName)) {
       console.log(`[WhatsApp] Skipping unsupported media type: ${mediaContentType}`);
       continue;
     }
@@ -112,20 +107,26 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceNo = generateReferenceNo();
+    const classified = classifyInvoiceFile(mediaContentType, mediaFileName);
+    if (!classified.mimeType) {
+      console.log(`[WhatsApp] Could not classify media: ${mediaContentType}`);
+      continue;
+    }
     const EXT_MAP: Record<string, string> = {
       "application/pdf": "pdf",
-      "image/jpeg":      "jpg",
-      "image/png":       "png",
-      "image/webp":      "webp",
-      "image/heic":      "heic",
-      "image/tiff":      "tiff",
+      "application/xml": "xml",
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+      "image/heic": "heic",
+      "image/tiff": "tiff",
     };
-    const ext = EXT_MAP[mediaContentType] ?? "jpg";
+    const ext = EXT_MAP[classified.mimeType] ?? "bin";
 
     const stored = await storeFile(
       buffer,
       `whatsapp-${referenceNo}.${ext}`,
-      mediaContentType,
+      classified.mimeType,
       "whatsapp"
     );
 

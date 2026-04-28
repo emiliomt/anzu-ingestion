@@ -44,7 +44,7 @@ interface PublicOrganization {
   logo: string | null;
 }
 
-const ACCEPTED = ".pdf,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
+const ACCEPTED = ".pdf,.xml,.zip,.png,.jpg,.jpeg,.heic,.tiff,.webp";
 const MAX_SIZE = 30 * 1024 * 1024;
 const MAX_FILES = 250;
 const UPLOAD_BATCH_SIZE = 10;
@@ -493,7 +493,7 @@ export function UploadZone({ onUploadComplete, prefilledEmail = "" }: UploadZone
           Drop invoices here or <span className="text-indigo-600">browse</span>
         </p>
         <p className="text-sm text-gray-400">
-          PDF, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 30 MB per file · Up to 250 files
+          PDF, XML, ZIP, PNG, JPG, JPEG, HEIC, TIFF · Max 30 MB per file · Up to 250 files
         </p>
       </div>
 
