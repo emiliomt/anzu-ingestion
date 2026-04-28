@@ -510,6 +510,7 @@ async function processInvoice(
             value: invoiceNum,
             invoice: {
               id: { not: invoiceId },
+              isDuplicate: false, // only originals can be the source of truth
               ...(vendorId ? { vendorId } : {}),
             },
           },
