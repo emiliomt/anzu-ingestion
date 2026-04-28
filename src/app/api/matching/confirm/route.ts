@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { boostMatchConfidence, normalizeConfidence } from "@/lib/matching-confidence";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +20,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, action: "rejected" });
   }
 
+  const existing = await prisma.invoiceMatch.findUnique({
+    where: { id: body.matchId },
+    select: { confidence: true },
+  });
+
+  if (!existing) {
+    return NextResponse.json({ error: "Match not found" }, { status: 404 });
+  }
+
   const match = await prisma.invoiceMatch.update({
     where: { id: body.matchId },
     data: {
       isConfirmed: true,
       confirmedBy: body.confirmedBy ?? "admin",
       confirmedAt: new Date(),
+      confidence: boostMatchConfidence(
+        normalizeConfidence(existing.confidence ?? 0),
+        { isConfirmed: true }
+      ),
     },
   });
 
